@@ -3,6 +3,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 
 function assertAdmin(role: unknown): role is "ADMIN" {
   return role === "ADMIN";
@@ -21,17 +22,22 @@ export async function getProductsWithStock(args: { storeId: string }) {
   }
 
   const storeId = (args.storeId ?? "").trim();
-  if (!storeId) {
-    return [];
-  }
+  if (!storeId) return [];
 
-  const products = await prisma.product.findMany({
+  type ProductWithLatestEntry = Prisma.ProductGetPayload<{
+    include: {
+      dailyEntries: {
+        where: { storeId: string };
+        orderBy: { date: "desc" };
+        take: 1;
+        select: { endQty: true; date: true };
+      };
+    };
+  }>;
+
+  const products = (await prisma.product.findMany({
     orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      sku: true,
-      isActive: true,
+    include: {
       dailyEntries: {
         where: { storeId },
         orderBy: { date: "desc" },
@@ -39,10 +45,10 @@ export async function getProductsWithStock(args: { storeId: string }) {
         select: { endQty: true, date: true },
       },
     },
-  });
+  })) as ProductWithLatestEntry[];
 
   return products.map((p) => {
-    const latest = p.dailyEntries[0];
+    const latest = p.dailyEntries?.[0];
     return {
       id: p.id,
       name: p.name,
@@ -69,7 +75,6 @@ export async function createProduct(args: { name: string; sku?: string | null })
     throw new Error("INVALID_NAME");
   }
 
-  // sku is optional; if blank, store null
   const skuOrNull = sku.length ? sku : null;
 
   const created = await prisma.product.create({
@@ -88,7 +93,6 @@ export async function createProduct(args: { name: string; sku?: string | null })
     },
   });
 
-  // Keep your original response shape, but ensure client can use created.product reliably.
   return { ok: true, product: created };
 }
 
