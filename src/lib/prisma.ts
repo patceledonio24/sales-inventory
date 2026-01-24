@@ -2,8 +2,14 @@ import { PrismaClient } from "@/generated/prisma/client";
 import { withAccelerate } from "@prisma/extension-accelerate";
 
 function createPrismaClient() {
+  const accelerateUrl = process.env.PRISMA_ACCELERATE_URL;
+
+  if (!accelerateUrl) {
+    throw new Error("Missing PRISMA_ACCELERATE_URL");
+  }
+
   return new PrismaClient({
-    accelerateUrl: process.env.DATABASE_URL!,
+    accelerateUrl,
     log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["error"],
   }).$extends(withAccelerate());
 }
