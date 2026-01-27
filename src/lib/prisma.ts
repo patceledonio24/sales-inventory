@@ -8,6 +8,17 @@ function createPrismaClient() {
     throw new Error("Missing PRISMA_ACCELERATE_URL");
   }
 
+  if (
+    process.env.NODE_ENV === "development" &&
+    (process.env.VERCEL_ENV === "production" || process.env.NEXT_PUBLIC_APP_ENV === "prod")
+  ) {
+    throw new Error("Refusing to run PROD configuration in development.");
+  }
+
+  if (process.env.DB_ENV !== process.env.NEXT_PUBLIC_APP_ENV) {
+    throw new Error("DB_ENV and NEXT_PUBLIC_APP_ENV mismatch");
+  }
+
   return new PrismaClient({
     accelerateUrl,
     log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["error"],
