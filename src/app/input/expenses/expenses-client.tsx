@@ -19,10 +19,13 @@ import {
   TableBody,
   Snackbar,
   Alert,
+  Autocomplete,
+  CircularProgress,
 } from "@mui/material";
 
 import PageShell, { SectionCard } from "@/components/ui/page-shell";
-import { addExpense, deleteExpense } from "./actions";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
+import { addExpense, deleteExpense, searchExpenseSuggestions } from "./actions";
 
 type Store = { id: string; name: string };
 type ExpenseRow = { id: string; description: string; amount: string };
@@ -37,7 +40,7 @@ function money2(v: number) {
 }
 
 export default function ExpensesClient(props: {
-  stores?: Store[]; // allow undefined safely
+  stores?: Store[];
   initialStoreId: string;
   initialDateISO: string;
   initialRows: ExpenseRow[];
@@ -48,7 +51,6 @@ export default function ExpensesClient(props: {
 
   const stores = Array.isArray(props.stores) ? props.stores : [];
 
-  // Always strings to avoid uncontrolled warnings + avoid crash when stores is empty
   const safeInitialStoreId =
     (props.initialStoreId ?? "").trim() || stores[0]?.id || "";
   const safeInitialDateISO = (props.initialDateISO ?? "").trim() || "";
@@ -58,21 +60,50 @@ export default function ExpensesClient(props: {
 
   const [rows, setRows] = useState<ExpenseRow[]>(props.initialRows ?? []);
 
-  // Sync local rows when server props change
   useEffect(() => {
     setRows(props.initialRows ?? []);
   }, [props.initialRows]);
 
-  // Also keep storeId valid if stores arrive later
   useEffect(() => {
-    if (!storeId && stores.length > 0) {
-      setStoreId(stores[0].id);
-    }
+    if (!storeId && stores.length > 0) setStoreId(stores[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stores.length]);
 
+  // ===== Input state =====
   const [desc, setDesc] = useState("");
   const [amount, setAmount] = useState("");
+
+  // ===== Autocomplete =====
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+
+  useEffect(() => {
+    const q = desc.trim();
+    if (!storeId || q.length < 1) {
+      setSuggestions([]);
+      setSuggestLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestLoading(true);
+
+    const t = setTimeout(async () => {
+      try {
+        const res = await searchExpenseSuggestions({ storeId, q, limit: 8 });
+        if (!cancelled && res?.ok) setSuggestions(res.items ?? []);
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setSuggestLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [desc, storeId]);
 
   const [snack, setSnack] = useState<{
     open: boolean;
@@ -85,14 +116,17 @@ export default function ExpensesClient(props: {
     [stores, storeId]
   );
 
-  const total = useMemo(() => {
-    return rows.reduce((sum, r) => sum + toNum(r.amount), 0);
-  }, [rows]);
+  const total = useMemo(
+    () => rows.reduce((sum, r) => sum + toNum(r.amount), 0),
+    [rows]
+  );
 
   function navigate(nextStoreId: string, nextDateISO: string) {
     startTransition(() => {
       router.push(
-        `/input/expenses?storeId=${encodeURIComponent(nextStoreId)}&date=${encodeURIComponent(nextDateISO)}`
+        `/input/expenses?storeId=${encodeURIComponent(nextStoreId)}&date=${encodeURIComponent(
+          nextDateISO
+        )}`
       );
       router.refresh();
     });
@@ -110,9 +144,21 @@ export default function ExpensesClient(props: {
     navigate(storeId, v);
   }
 
+  // ===== ADD EXPENSE (with zero validation) =====
   async function onAdd() {
     const d = desc.trim();
+    const amt = toNum(amount || "0");
+
     if (!d || !storeId || !dateISO) return;
+
+    if (amt <= 0) {
+      setSnack({
+        open: true,
+        type: "error",
+        message: "Amount must be greater than 0.",
+      });
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -120,30 +166,38 @@ export default function ExpensesClient(props: {
           storeId,
           dateISO,
           description: d,
-          amount: amount || "0",
+          amount: String(amt),
         });
 
         if (!res?.ok) throw new Error("ADD_FAILED");
 
-        if (res.row) setRows((prev) => [...prev, res.row]);
-        else router.refresh();
+        if (res.row) {
+          const safeRow: ExpenseRow = {
+            id: String((res.row as any).id),
+            description: String((res.row as any).description ?? ""),
+            amount: String((res.row as any).amount ?? "0"),
+          };
+          setRows((prev) => [...prev, safeRow]);
+        } else {
+          router.refresh();
+        }
 
         setDesc("");
         setAmount("");
+        setSuggestions([]);
 
-        setSnack({ open: true, type: "success", message: "Expense added successfully." });
+        setSnack({
+          open: true,
+          type: "success",
+          message: "Expense added successfully.",
+        });
       } catch (e: any) {
         console.error(e);
-        const msg = typeof e?.message === "string" ? e.message : "";
-        if (msg === "DESCRIPTION_REQUIRED") {
-          setSnack({ open: true, type: "error", message: "Description is required." });
-        } else if (msg === "INVALID_DATE") {
-          setSnack({ open: true, type: "error", message: "Invalid date." });
-        } else if (msg === "UNAUTHORIZED") {
-          setSnack({ open: true, type: "error", message: "Unauthorized." });
-        } else {
-          setSnack({ open: true, type: "error", message: "Failed to add expense." });
-        }
+        setSnack({
+          open: true,
+          type: "error",
+          message: "Failed to add expense.",
+        });
       }
     });
   }
@@ -155,8 +209,7 @@ export default function ExpensesClient(props: {
         if (!res?.ok) throw new Error("DELETE_FAILED");
         setRows((prev) => prev.filter((r) => r.id !== id));
         setSnack({ open: true, type: "success", message: "Expense deleted." });
-      } catch (e) {
-        console.error(e);
+      } catch {
         setSnack({ open: true, type: "error", message: "Failed to delete expense." });
       }
     });
@@ -169,34 +222,23 @@ export default function ExpensesClient(props: {
         subtitle="Record daily expenses and petty cash items."
         headerLeft={
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="center">
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 320 }}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: { xs: "100%", sm: 320 } }}>
               <Typography variant="body2" color="text.secondary" sx={{ minWidth: 42 }}>
                 Store
               </Typography>
               <FormControl size="small" sx={{ minWidth: 220 }}>
-                <Select
-                  value={storeId}
-                  onChange={(e) => onChangeStore(String(e.target.value))}
-                  displayEmpty
-                  disabled={isPending || stores.length === 0}
-                >
-                  {stores.length === 0 ? (
-                    <MenuItem value="">
-                      <em>No stores</em>
+                <Select value={storeId} onChange={(e) => onChangeStore(String(e.target.value))}>
+                  {stores.map((s) => (
+                    <MenuItem key={s.id} value={s.id}>
+                      {s.name}
                     </MenuItem>
-                  ) : (
-                    stores.map((s) => (
-                      <MenuItem key={s.id} value={s.id}>
-                        {s.name}
-                      </MenuItem>
-                    ))
-                  )}
+                  ))}
                 </Select>
               </FormControl>
             </Stack>
 
             <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" color="text.secondary" sx={{ minWidth: 36 }}>
+              <Typography variant="body2" color="text.secondary">
                 Date
               </Typography>
               <TextField
@@ -204,116 +246,103 @@ export default function ExpensesClient(props: {
                 type="date"
                 value={dateISO}
                 onChange={(e) => onChangeDate(e.target.value)}
-                disabled={isPending}
-                InputLabelProps={{ shrink: true }}
               />
             </Stack>
           </Stack>
         }
         headerRight={
-          <Stack direction="row" spacing={1.25} alignItems="center" justifyContent="flex-end">
-            <Chip
-              size="small"
-              label={`Store: ${storeName}`}
-              variant="outlined"
-              sx={{ borderColor: "rgba(255,255,255,0.18)", color: "rgba(255,255,255,0.8)" }}
-            />
-            <Chip
-              size="small"
-              label={`Date: ${dateISO}`}
-              variant="outlined"
-              sx={{ borderColor: "rgba(255,255,255,0.18)", color: "rgba(255,255,255,0.8)" }}
-            />
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <Chip size="small" label={`Store: ${storeName}`} variant="outlined" />
+            <Chip size="small" label={`Date: ${dateISO}`} variant="outlined" />
             <Stack spacing={0} sx={{ textAlign: "right", mr: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Total
-              </Typography>
-              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.1 }}>
+              <Typography variant="caption">Total</Typography>
+              <Typography variant="h6" fontWeight={900}>
                 {money2(total)}
               </Typography>
             </Stack>
           </Stack>
         }
       >
-        <SectionCard title="Expense Entries" tip="Tip: Add items then delete if needed.">
+        <SectionCard title="Expense Entries" tip="Tip: Use suggestions for faster input.">
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ mb: 2 }}>
-            <TextField
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder="Expense description (e.g., Uling, Basahan, Lalamove...)"
-              size="small"
-              disabled={isPending}
+            <Autocomplete
+              freeSolo
+              options={suggestions}
+              inputValue={desc}
+              onInputChange={(_, value) => setDesc(value)}
+              filterOptions={(x) => x}
+              loading={suggestLoading}
               fullWidth
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Expense description (e.g., Lalamove, Uling, Basahan)"
+                  size="small"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {suggestLoading ? <CircularProgress size={18} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
             />
+
             <TextField
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Amount"
               inputMode="decimal"
               size="small"
-              disabled={isPending}
               sx={{ width: { xs: "100%", sm: 180 } }}
             />
+
             <Button
               variant="contained"
               onClick={onAdd}
-              disabled={isPending || !storeId || !dateISO || !desc.trim()}
+              disabled={isPending || !desc.trim() || toNum(amount) <= 0}
               sx={{ borderRadius: 2, minWidth: 120 }}
             >
-              {isPending ? "Working..." : "Add"}
+              Add
             </Button>
           </Stack>
 
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 800 }}>Description</TableCell>
-                <TableCell sx={{ fontWeight: 800, width: 160 }} align="right">
-                  Amount
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800, width: 140 }} />
-              </TableRow>
-            </TableHead>
-
-            <TableBody>
-              {rows.length === 0 ? (
+          <ResponsiveTable minWidth={720}>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={3}>
-                    <Typography variant="body2" color="text.secondary">
-                      No expenses for this date.
-                    </Typography>
+                  <TableCell sx={{ fontWeight: 800 }}>Description</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }} align="right">
+                    Amount
                   </TableCell>
+                  <TableCell />
                 </TableRow>
-              ) : (
-                rows.map((r) => (
+              </TableHead>
+              <TableBody>
+                {rows.map((r) => (
                   <TableRow key={r.id} hover>
-                    <TableCell sx={{ fontWeight: 600 }}>{r.description}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
-                      {money2(toNum(r.amount))}
-                    </TableCell>
+                    <TableCell>{r.description}</TableCell>
+                    <TableCell align="right">{money2(toNum(r.amount))}</TableCell>
                     <TableCell align="right">
-                      <Button
-                        variant="outlined"
-                        onClick={() => onDelete(r.id)}
-                        disabled={isPending}
-                        sx={{ borderRadius: 2 }}
-                      >
+                      <Button variant="outlined" onClick={() => onDelete(r.id)}>
                         Delete
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-
-              <TableRow>
-                <TableCell sx={{ fontWeight: 900 }}>Total</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
-                  {money2(total)}
-                </TableCell>
-                <TableCell />
-              </TableRow>
-            </TableBody>
-          </Table>
+                ))}
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 900 }}>Total</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 900 }}>
+                    {money2(total)}
+                  </TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableBody>
+            </Table>
+          </ResponsiveTable>
         </SectionCard>
       </PageShell>
 
@@ -323,11 +352,7 @@ export default function ExpensesClient(props: {
         onClose={() => setSnack((s) => ({ ...s, open: false }))}
         anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
       >
-        <Alert
-          severity={snack.type}
-          variant="filled"
-          onClose={() => setSnack((s) => ({ ...s, open: false }))}
-        >
+        <Alert severity={snack.type} variant="filled">
           {snack.message}
         </Alert>
       </Snackbar>

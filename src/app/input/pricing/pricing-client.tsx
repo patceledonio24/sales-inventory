@@ -4,6 +4,7 @@ import * as React from "react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Box,
   Stack,
   FormControl,
   Select,
@@ -197,7 +198,8 @@ export default function PricingClient(props: {
         }
       >
         <SectionCard title="Price List" tip="Tip: Use tab to move across inputs quickly.">
-          <Table size="small">
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: { xs: 620, md: "auto" } }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ fontWeight: 800 }}>Product</TableCell>
@@ -224,7 +226,7 @@ export default function PricingClient(props: {
                         onChange={(e) => setRowValue(p.id, { lp: e.target.value })}
                         size="small"
                         inputProps={{ inputMode: "decimal" }}
-                        sx={{ width: 140 }}
+                        sx={{ width: { xs: 120, sm: 140 } }}
                       />
                     </TableCell>
 
@@ -234,7 +236,7 @@ export default function PricingClient(props: {
                         onChange={(e) => setRowValue(p.id, { srp: e.target.value })}
                         size="small"
                         inputProps={{ inputMode: "decimal" }}
-                        sx={{ width: 140 }}
+                        sx={{ width: { xs: 120, sm: 140 } }}
                       />
                     </TableCell>
                   </TableRow>
@@ -251,7 +253,8 @@ export default function PricingClient(props: {
                 </TableRow>
               )}
             </TableBody>
-          </Table>
+            </Table>
+          </Box>
         </SectionCard>
       </PageShell>
 

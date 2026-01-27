@@ -17,9 +17,8 @@ function toInt(v: unknown) {
 /**
  * Save daily inventory entries for a store/date.
  *
- * Supports BOTH payload shapes so we don't break the client:
- * - args.rows:    { beginQty/incomingQty/salesQty as string }  (your current)
- * - args.entries: { beginQty/incomingQty/salesQty as number }  (if client sends numbers)
+ * Note: Discounted qty is no longer captured at the per-product inventory level.
+ * Discounted qty is captured at the Remittance page (DailyRemittance.discountedQty).
  */
 export async function saveDailyEntries(args: {
   storeId: string;
@@ -98,6 +97,8 @@ export async function saveDailyEntries(args: {
           endQty,
           lpSnapshot: price.lp,
           srpSnapshot: price.srp,
+          // keep column stable for backward compatibility
+          discountedQty: 0,
         },
         create: {
           storeId: args.storeId,
@@ -109,11 +110,11 @@ export async function saveDailyEntries(args: {
           endQty,
           lpSnapshot: price.lp,
           srpSnapshot: price.srp,
+          discountedQty: 0,
         },
       });
     }
   });
 
-  // CRITICAL: return a success signal so the client can show a snackbar
   return { ok: true };
 }

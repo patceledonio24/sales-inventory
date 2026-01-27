@@ -4,12 +4,12 @@ import * as React from "react";
 import { useMemo, useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Box,
   Stack,
-  Typography,
   FormControl,
   Select,
   MenuItem,
-  TextField,
+  Typography,
   Chip,
   Button,
   Table,
@@ -17,6 +17,7 @@ import {
   TableRow,
   TableCell,
   TableBody,
+  TextField,
   Snackbar,
   Alert,
 } from "@mui/material";
@@ -42,6 +43,12 @@ function isoDateOnly(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+function safeISODateInput(v: string) {
+  const s = (v ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  return s;
+}
+
 export default function InventoryClient(props: {
   stores: Store[];
   products: Product[];
@@ -58,16 +65,14 @@ export default function InventoryClient(props: {
   const stores = Array.isArray(props.stores) ? props.stores : [];
   const products = Array.isArray(props.products) ? props.products : [];
 
-  // Controlled defaults
-  const safeInitialStoreId =
-    (props.initialStoreId ?? "").trim() || stores[0]?.id || "";
-  const safeInitialDateISO =
-    (props.initialDateISO ?? "").trim() || isoDateOnly(new Date());
+  // Controlled defaults (avoid uncontrolled warnings)
+  const safeInitialStoreId = (props.initialStoreId ?? "").trim() || stores[0]?.id || "";
+  const safeInitialDateISO = safeISODateInput(props.initialDateISO ?? "") || isoDateOnly(new Date());
 
   const [storeId, setStoreId] = useState<string>(safeInitialStoreId);
   const [dateISO, setDateISO] = useState<string>(safeInitialDateISO);
 
-  // Map prices by productId
+  // priceMap by productId
   const priceMap = useMemo(() => {
     const m = new Map<string, { lp: number; srp: number }>();
     for (const p of props.prices ?? []) {
@@ -97,7 +102,7 @@ export default function InventoryClient(props: {
     });
   });
 
-  // IMPORTANT: When server props change (after navigation), resync rows
+  // Resync after navigation/refresh (server props changed)
   useEffect(() => {
     const entryMap = new Map((props.initialEntries ?? []).map((e) => [e.productId, e]));
     setRows(
@@ -129,7 +134,7 @@ export default function InventoryClient(props: {
     let sum = 0;
     for (const r of rows) {
       const srp = priceMap.get(r.productId)?.srp ?? 0;
-      sum += n(r.salesQty) * srp;
+      sum += Math.max(0, n(r.salesQty) * srp);
     }
     return sum;
   }, [rows, priceMap, isAdmin]);
@@ -137,9 +142,7 @@ export default function InventoryClient(props: {
   function navigate(nextStoreId: string, nextDateISO: string) {
     startTransition(() => {
       router.push(
-        `/input/inventory?storeId=${encodeURIComponent(nextStoreId)}&date=${encodeURIComponent(
-          nextDateISO
-        )}`
+        `/input/inventory?storeId=${encodeURIComponent(nextStoreId)}&date=${encodeURIComponent(nextDateISO)}`
       );
       router.refresh();
     });
@@ -152,17 +155,21 @@ export default function InventoryClient(props: {
   }
 
   function onChangeDate(next: string) {
-    const v = (next ?? "").toString();
+    const v = safeISODateInput(next) || isoDateOnly(new Date(next));
     setDateISO(v);
     navigate(storeId, v);
   }
 
-  function updateRow(productId: string, patch: Partial<{ beginQty: string; incomingQty: string; salesQty: string }>) {
+  function updateRow(
+    productId: string,
+    patch: Partial<{ beginQty: string; incomingQty: string; salesQty: string }>
+  ) {
     setRows((prev) =>
       prev.map((r) => {
         if (r.productId !== productId) return r;
         const next = { ...r, ...patch };
-        const endQty = n(next.beginQty) + n(next.incomingQty) - n(next.salesQty);
+        const sales = n(next.salesQty);
+        const endQty = n(next.beginQty) + n(next.incomingQty) - sales;
         return { ...next, endQty };
       })
     );
@@ -205,78 +212,76 @@ export default function InventoryClient(props: {
     <>
       <PageShell
         title="Inventory Input"
-        subtitle="Enter daily inventory movement and sales. Save updates for all products in one click."
+        subtitle="Manual: Beginning, Incoming, Sales. Computed: Ending + Value. Saved entries are loaded per store/date."
         headerLeft={
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="center">
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 320 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ minWidth: 42 }}>
-                Store
-              </Typography>
-              <FormControl size="small" sx={{ minWidth: 220 }}>
-                <Select
-                  value={storeId}
-                  onChange={(e) => onChangeStore(String(e.target.value))}
-                  displayEmpty
-                  disabled={isPending || stores.length === 0}
-                >
-                  {stores.length === 0 ? (
-                    <MenuItem value="">
-                      <em>No stores</em>
-                    </MenuItem>
-                  ) : (
-                    stores.map((s) => (
-                      <MenuItem key={s.id} value={s.id}>
-                        {s.name}
-                      </MenuItem>
-                    ))
-                  )}
-                </Select>
-              </FormControl>
-            </Stack>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 42 }}>
+              Store
+            </Typography>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" color="text.secondary" sx={{ minWidth: 36 }}>
-                Date
-              </Typography>
-              <TextField
-                size="small"
-                type="date"
-                value={dateISO}
-                onChange={(e) => onChangeDate(e.target.value)}
-                disabled={isPending}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Stack>
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <Select
+                value={storeId}
+                onChange={(e) => onChangeStore(String(e.target.value))}
+                displayEmpty
+                disabled={stores.length === 0}
+              >
+                {stores.length === 0 ? (
+                  <MenuItem value="">
+                    <em>No stores</em>
+                  </MenuItem>
+                ) : (
+                  stores.map((s) => (
+                    <MenuItem key={s.id} value={s.id}>
+                      {s.name}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 1, minWidth: 36 }}>
+              Date
+            </Typography>
+
+            <TextField
+              type="date"
+              size="small"
+              value={dateISO}
+              onChange={(e) => onChangeDate(e.target.value)}
+              sx={{ width: 170 }}
+            />
           </Stack>
         }
         headerRight={
-          <Stack direction="row" spacing={1.25} alignItems="center" justifyContent="flex-end">
+          <Stack
+            direction="row"
+            spacing={1.25}
+            alignItems="center"
+            justifyContent="flex-end"
+            sx={{ flexWrap: "wrap" }}
+          >
             <Chip
               size="small"
               label={`Store: ${storeName}`}
               variant="outlined"
-              sx={(theme) => ({
-                borderColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.18)" : theme.palette.divider,
-                color: theme.palette.text.secondary,
-              })}
+              sx={{ borderColor: "rgba(255,255,255,0.18)", color: "rgba(255,255,255,0.8)" }}
             />
+
             <Chip
               size="small"
               label={`Date: ${dateISO}`}
               variant="outlined"
-              sx={(theme) => ({
-                borderColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.18)" : theme.palette.divider,
-                color: theme.palette.text.secondary,
-              })}
+              sx={{ borderColor: "rgba(255,255,255,0.18)", color: "rgba(255,255,255,0.8)" }}
             />
 
             {isAdmin && (
-              <Stack spacing={0} sx={{ textAlign: "right", mr: 1 }}>
+              <Stack spacing={0} sx={{ textAlign: "right", mr: 1, minWidth: 160 }}>
                 <Typography variant="caption" color="text.secondary">
                   Est. Sales Revenue
                 </Typography>
                 <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.1 }}>
-                  {money2(estSalesRevenue)}
+                  ₱{money2(estSalesRevenue)}
                 </Typography>
               </Stack>
             )}
@@ -285,7 +290,7 @@ export default function InventoryClient(props: {
               variant="contained"
               onClick={onSaveAll}
               disabled={isPending || !storeId || !dateISO || products.length === 0}
-              sx={{ borderRadius: 2, minWidth: 120 }}
+              sx={{ borderRadius: 2, minWidth: 140 }}
             >
               {isPending ? "Saving..." : "Save All"}
             </Button>
@@ -293,111 +298,112 @@ export default function InventoryClient(props: {
         }
       >
         <SectionCard title="Daily Entries" tip="Tip: Use tab to move across inputs quickly.">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 800 }}>Product</TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  LP
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  SRP
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  Begin
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  Incoming
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  Sales
-                </TableCell>
-                <TableCell sx={{ fontWeight: 800 }} align="right">
-                  End
-                </TableCell>
-                {isAdmin && (
-                  <TableCell sx={{ fontWeight: 800 }} align="right">
-                    Sales Value
-                  </TableCell>
-                )}
-              </TableRow>
-            </TableHead>
-
-            <TableBody>
-              {products.map((p) => {
-                const r = rows.find((x) => x.productId === p.id);
-                const lp = priceMap.get(p.id)?.lp ?? 0;
-                const srp = priceMap.get(p.id)?.srp ?? 0;
-                const salesQty = r ? n(r.salesQty) : 0;
-                const salesValue = salesQty * srp;
-
-                return (
-                  <TableRow key={p.id} hover>
-                    <TableCell sx={{ fontWeight: 700 }}>{p.name}</TableCell>
-
-                    <TableCell align="right">{money2(lp)}</TableCell>
-                    <TableCell align="right">{money2(srp)}</TableCell>
-
-                    <TableCell align="right" sx={{ width: 140 }}>
-                      <TextField
-                        value={r?.beginQty ?? "0"}
-                        onChange={(e) => updateRow(p.id, { beginQty: e.target.value })}
-                        size="small"
-                        inputProps={{ inputMode: "numeric" }}
-                        sx={{ width: 120 }}
-                      />
-                    </TableCell>
-
-                    <TableCell align="right" sx={{ width: 140 }}>
-                      <TextField
-                        value={r?.incomingQty ?? "0"}
-                        onChange={(e) => updateRow(p.id, { incomingQty: e.target.value })}
-                        size="small"
-                        inputProps={{ inputMode: "numeric" }}
-                        sx={{ width: 120 }}
-                      />
-                    </TableCell>
-
-                    <TableCell align="right" sx={{ width: 140 }}>
-                      <TextField
-                        value={r?.salesQty ?? "0"}
-                        onChange={(e) => updateRow(p.id, { salesQty: e.target.value })}
-                        size="small"
-                        inputProps={{ inputMode: "numeric" }}
-                        sx={{ width: 120 }}
-                      />
-                    </TableCell>
-
-                    <TableCell align="right" sx={{ fontWeight: 900 }}>
-                      {r?.endQty ?? 0}
-                    </TableCell>
-
-                    {isAdmin && (
-                      <TableCell align="right" sx={{ fontWeight: 900 }}>
-                        {money2(salesValue)}
-                      </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
-
-              {products.length === 0 && (
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: { xs: 980, md: "auto" } }}>
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={isAdmin ? 8 : 7}>
-                    <Typography variant="body2" color="text.secondary">
-                      No active products found. Add products first.
-                    </Typography>
+                  <TableCell sx={{ fontWeight: 800 }}>Product</TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }} align="right">
+                    LP
                   </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }} align="right">
+                    SRP
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 160 }} align="right">
+                    Begin
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 160 }} align="right">
+                    Incoming
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 160 }} align="right">
+                    Sales
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }} align="right">
+                    End
+                  </TableCell>
+                  {isAdmin && (
+                    <TableCell sx={{ fontWeight: 800, width: 170 }} align="right">
+                      Sales Value
+                    </TableCell>
+                  )}
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHead>
 
-          {isAdmin && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-              Note: “Sales Value” is computed as Sales Qty × SRP.
-            </Typography>
-          )}
+              <TableBody>
+                {products.map((p) => {
+                  const r = rows.find((x) => x.productId === p.id);
+                  const lp = priceMap.get(p.id)?.lp ?? 0;
+                  const srp = priceMap.get(p.id)?.srp ?? 0;
+
+                  const salesQty = r ? n(r.salesQty) : 0;
+                  const salesValue = salesQty * srp;
+
+                  return (
+                    <TableRow key={p.id} hover>
+                      <TableCell sx={{ fontWeight: 700 }}>{p.name}</TableCell>
+
+                      <TableCell align="right">{money2(lp)}</TableCell>
+                      <TableCell align="right">{money2(srp)}</TableCell>
+
+                      <TableCell align="right">
+                        <TextField
+                          value={r?.beginQty ?? "0"}
+                          onChange={(e) => updateRow(p.id, { beginQty: e.target.value })}
+                          size="small"
+                          inputProps={{ inputMode: "numeric" }}
+                          sx={{ width: { xs: 120, sm: 140 } }}
+                        />
+                      </TableCell>
+
+                      <TableCell align="right">
+                        <TextField
+                          value={r?.incomingQty ?? "0"}
+                          onChange={(e) => updateRow(p.id, { incomingQty: e.target.value })}
+                          size="small"
+                          inputProps={{ inputMode: "numeric" }}
+                          sx={{ width: { xs: 120, sm: 140 } }}
+                        />
+                      </TableCell>
+
+                      <TableCell align="right">
+                        <TextField
+                          value={r?.salesQty ?? "0"}
+                          onChange={(e) => updateRow(p.id, { salesQty: e.target.value })}
+                          size="small"
+                          inputProps={{ inputMode: "numeric" }}
+                          sx={{ width: { xs: 120, sm: 140 } }}
+                        />
+                      </TableCell>
+
+                      <TableCell align="right" sx={{ fontWeight: 900 }}>
+                        {r?.endQty ?? 0}
+                      </TableCell>
+
+                      {isAdmin && (
+                        <TableCell align="right" sx={{ fontWeight: 900 }}>
+                          {money2(salesValue)}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+
+                {products.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={isAdmin ? 8 : 7}>
+                      <Typography variant="body2" color="text.secondary">
+                        No active products found. Add products first.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Box>
+
+          <Typography variant="caption" sx={{ opacity: 0.75, display: "block", mt: 1 }}>
+            Note: “Sales Value” is computed as Sales Qty × SRP (snapshot).
+          </Typography>
         </SectionCard>
       </PageShell>
 

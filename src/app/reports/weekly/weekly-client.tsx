@@ -15,6 +15,7 @@ import {
 import { useTheme } from "@mui/material/styles";
 import { useRouter } from "next/navigation";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
 
 type Store = { id: string; name: string };
 type DayRow = { date: string; sales: string; cash: string; gcash: string; expenses: string; net: string };
@@ -98,7 +99,16 @@ function PieBlock(props: { title: string; data: { name: string; value: number }[
           <Box sx={{ height: 270 }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={props.data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} innerRadius={55} paddingAngle={2}>
+                <Pie
+                  data={props.data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  innerRadius={55}
+                  paddingAngle={2}
+                >
                   {props.data.map((_, idx) => (
                     <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                   ))}
@@ -226,7 +236,11 @@ export default function ReportsClient(props: {
             <Stack direction="row" spacing={2} flexWrap="wrap" alignItems="center">
               <Box>
                 <Typography sx={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>Store</Typography>
-                <select value={storeId} onChange={(e) => setStoreId(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                <select
+                  value={storeId}
+                  onChange={(e) => setStoreId(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
                   {props.stores.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -237,12 +251,22 @@ export default function ReportsClient(props: {
 
               <Box>
                 <Typography sx={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>From</Typography>
-                <input type="date" value={fromISO} onChange={(e) => setFromISO(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8 }} />
+                <input
+                  type="date"
+                  value={fromISO}
+                  onChange={(e) => setFromISO(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                />
               </Box>
 
               <Box>
                 <Typography sx={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>To</Typography>
-                <input type="date" value={toISO} onChange={(e) => setToISO(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8 }} />
+                <input
+                  type="date"
+                  value={toISO}
+                  onChange={(e) => setToISO(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                />
               </Box>
 
               <FormControlLabel
@@ -284,30 +308,32 @@ export default function ReportsClient(props: {
           {days.length === 0 ? (
             <Typography sx={{ opacity: 0.75 }}>No data for selected range.</Typography>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th align="left">Date</th>
-                  <th align="right">Sales</th>
-                  <th align="right">Cash</th>
-                  <th align="right">GCash</th>
-                  <th align="right">Expenses</th>
-                  <th align="right">Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                {days.map((d, i) => (
-                  <tr key={d.date} style={{ background: i % 2 === 0 ? zebraA : zebraB }}>
-                    <td>{d.date}</td>
-                    <td align="right">{d.sales}</td>
-                    <td align="right">{d.cash}</td>
-                    <td align="right">{d.gcash}</td>
-                    <td align="right">{d.expenses}</td>
-                    <td align="right">{d.net}</td>
+            <ResponsiveTable minWidth={820}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "inherit" }}>
+                <thead>
+                  <tr>
+                    <th align="left">Date</th>
+                    <th align="right">Sales</th>
+                    <th align="right">Cash</th>
+                    <th align="right">GCash</th>
+                    <th align="right">Expenses</th>
+                    <th align="right">Net</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {days.map((d, i) => (
+                    <tr key={d.date} style={{ background: i % 2 === 0 ? zebraA : zebraB }}>
+                      <td>{d.date}</td>
+                      <td align="right">{d.sales}</td>
+                      <td align="right">{d.cash}</td>
+                      <td align="right">{d.gcash}</td>
+                      <td align="right">{d.expenses}</td>
+                      <td align="right">{d.net}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ResponsiveTable>
           )}
         </CardContent>
       </Card>

@@ -106,12 +106,21 @@ export function SectionCard(props: { title: string; tip?: string; children: Reac
       }}
     >
       <Stack spacing={1.25}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          alignItems={{ xs: "flex-start", sm: "center" }}
+          justifyContent="space-between"
+          spacing={{ xs: 0.5, sm: 0 }}
+        >
           <Typography variant="subtitle1" fontWeight={800}>
             {props.title}
           </Typography>
           {props.tip && (
-            <Typography variant="caption" color="text.secondary">
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ textAlign: { xs: "left", sm: "right" } }}
+            >
               {props.tip}
             </Typography>
           )}

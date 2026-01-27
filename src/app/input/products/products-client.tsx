@@ -1,35 +1,34 @@
 "use client";
 
 import * as React from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Box,
-  Paper,
-  Typography,
   Stack,
-  TextField,
+  FormControl,
+  Select,
+  MenuItem,
+  Typography,
+  Chip,
   Button,
   Table,
   TableHead,
   TableRow,
   TableCell,
   TableBody,
+  TextField,
   Switch,
   Divider,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Chip,
-  Alert,
   Tooltip,
+  Alert,
 } from "@mui/material";
 
+import PageShell, { SectionCard } from "@/components/ui/page-shell";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
 import { createProduct, setProductActive, getProductsWithStock } from "./actions";
 
-export type StoreRow = {
-  id: string;
-  name: string;
-};
+export type StoreRow = { id: string; name: string };
 
 export type ProductRow = {
   id: string;
@@ -41,35 +40,44 @@ export type ProductRow = {
 };
 
 type SortMode = "NAME_ASC" | "STOCK_DESC" | "STOCK_ASC" | "STATUS";
+type QuickFilter = "ALL" | "LOW" | "OUT";
+
+function n(v: any) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
 
 export default function ProductsClient({
   stores,
   initialStoreId,
   initialProducts,
+  isStaff,
 }: {
   stores: StoreRow[];
   initialStoreId: string;
   initialProducts: ProductRow[];
+  isStaff: boolean;
 }) {
-  const [storeId, setStoreId] = React.useState(initialStoreId);
-  const [products, setProducts] = React.useState<ProductRow[]>(initialProducts);
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
-  const [q, setQ] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [sku, setSku] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const [loadingStock, setLoadingStock] = React.useState(false);
+  const isAdmin = !isStaff;
 
-  // Optional enhancement: configurable LOW threshold (global, UI-level)
-  const [lowThreshold, setLowThreshold] = React.useState<number>(10);
+  const safeInitialStoreId = (initialStoreId ?? "").trim() || stores[0]?.id || "";
+  const [storeId, setStoreId] = useState<string>(safeInitialStoreId);
+  const [products, setProducts] = useState<ProductRow[]>(Array.isArray(initialProducts) ? initialProducts : []);
 
-  // Optional enhancement: sorting by stock / status
-  const [sortMode, setSortMode] = React.useState<SortMode>("NAME_ASC");
+  const [q, setQ] = useState("");
+  const [name, setName] = useState("");
+  const [sku, setSku] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loadingStock, setLoadingStock] = useState(false);
 
-  // Optional enhancement: quick filters from banner
-  const [quickFilter, setQuickFilter] = React.useState<"ALL" | "LOW" | "OUT">("ALL");
+  const [lowThreshold, setLowThreshold] = useState<number>(10);
+  const [sortMode, setSortMode] = useState<SortMode>("NAME_ASC");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("ALL");
 
-  const thresholdsText = React.useMemo(() => {
+  const thresholdsText = useMemo(() => {
     const t = Number.isFinite(lowThreshold) ? Math.max(0, Math.floor(lowThreshold)) : 10;
     return `OK: > ${t}, LOW: 1–${t}, OUT: 0`;
   }, [lowThreshold]);
@@ -79,91 +87,73 @@ export default function ProductsClient({
 
     if (qty <= 0) {
       return {
-        label: "OUT",
-        color: "error" as const, // RED
+        label: "OUT" as const,
+        color: "error" as const,
         tooltip: `Out of stock (0). ${thresholdsText}`,
         isPulsing: true,
       };
     }
     if (qty <= t) {
       return {
-        label: "LOW",
-        color: "warning" as const, // ORANGE
+        label: "LOW" as const,
+        color: "warning" as const,
         tooltip: `Low stock (≤ ${t}). ${thresholdsText}`,
         isPulsing: false,
       };
     }
     return {
-      label: "OK",
-      color: "success" as const, // GREEN
+      label: "OK" as const,
+      color: "success" as const,
       tooltip: `Sufficient stock (> ${t}). ${thresholdsText}`,
       isPulsing: false,
     };
   }
 
-  const stats = React.useMemo(() => {
+  const storeName = useMemo(
+    () => stores.find((s) => s.id === storeId)?.name ?? "-",
+    [stores, storeId]
+  );
+
+  const stats = useMemo(() => {
     let out = 0;
     let low = 0;
-
     for (const p of products) {
-      const st = statusOf(p.stock);
+      const st = statusOf(n(p.stock));
       if (st.label === "OUT") out += 1;
       else if (st.label === "LOW") low += 1;
     }
-
     return { out, low };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, lowThreshold]); // statusOf depends on lowThreshold
+  }, [products, lowThreshold]);
 
-  const normalizedQuery = React.useMemo(() => q.trim().toLowerCase(), [q]);
+  const normalizedQuery = useMemo(() => q.trim().toLowerCase(), [q]);
 
-  const viewRows = React.useMemo(() => {
-    // 1) search filter
+  const viewRows = useMemo(() => {
     let rows = products.filter((p) => {
       if (!normalizedQuery) return true;
-      const n = p.name.toLowerCase();
-      const k = (p.sku ?? "").toLowerCase();
-      return n.includes(normalizedQuery) || k.includes(normalizedQuery);
+      return (
+        p.name.toLowerCase().includes(normalizedQuery) ||
+        (p.sku ?? "").toLowerCase().includes(normalizedQuery)
+      );
     });
 
-    // 2) quick filter (from banner)
     if (quickFilter !== "ALL") {
-      rows = rows.filter((p) => statusOf(p.stock).label === quickFilter);
+      rows = rows.filter((p) => statusOf(n(p.stock)).label === quickFilter);
     }
 
-    // 3) sorting
-    const sortKey = (p: ProductRow) => {
-      const st = statusOf(p.stock).label;
-      // lower number = higher priority in STATUS sort
-      const statusRank = st === "OUT" ? 0 : st === "LOW" ? 1 : 2;
-      return { statusRank };
+    const statusRank = (p: ProductRow) => {
+      const st = statusOf(n(p.stock)).label;
+      return st === "OUT" ? 0 : st === "LOW" ? 1 : 2;
     };
 
     rows = [...rows].sort((a, b) => {
-      if (sortMode === "NAME_ASC") {
-        return a.name.localeCompare(b.name);
-      }
+      if (sortMode === "NAME_ASC") return a.name.localeCompare(b.name);
+      if (sortMode === "STOCK_DESC") return n(b.stock) - n(a.stock);
+      if (sortMode === "STOCK_ASC") return n(a.stock) - n(b.stock);
 
-      if (sortMode === "STOCK_DESC") {
-        const d = (b.stock ?? 0) - (a.stock ?? 0);
-        if (d !== 0) return d;
-        return a.name.localeCompare(b.name);
-      }
-
-      if (sortMode === "STOCK_ASC") {
-        const d = (a.stock ?? 0) - (b.stock ?? 0);
-        if (d !== 0) return d;
-        return a.name.localeCompare(b.name);
-      }
-
-      // STATUS: OUT first, then LOW, then OK; within each, lower stock first
-      const ra = sortKey(a).statusRank;
-      const rb = sortKey(b).statusRank;
+      const ra = statusRank(a);
+      const rb = statusRank(b);
       if (ra !== rb) return ra - rb;
-
-      const d = (a.stock ?? 0) - (b.stock ?? 0);
-      if (d !== 0) return d;
-
       return a.name.localeCompare(b.name);
     });
 
@@ -175,44 +165,48 @@ export default function ProductsClient({
     setLoadingStock(true);
     try {
       const rows = await getProductsWithStock({ storeId: nextStoreId });
-      setProducts(rows as ProductRow[]);
+      setProducts(Array.isArray(rows) ? (rows as ProductRow[]) : []);
     } finally {
       setLoadingStock(false);
     }
   }
 
-  async function onChangeStore(nextStoreId: string) {
-    setStoreId(nextStoreId);
+  function onChangeStore(nextStoreId: string) {
+    const v = (nextStoreId ?? "").toString();
+    setStoreId(v);
     setQuickFilter("ALL");
-    await refreshForStore(nextStoreId);
+    setQ("");
+    startTransition(async () => {
+      await refreshForStore(v);
+      router.refresh();
+    });
   }
 
   async function onAdd() {
-    const n = name.trim();
-    const k = sku.trim() || null;
-    if (!n) return;
+    if (!isAdmin) return;
+
+    const nm = name.trim();
+    const sk = sku.trim() || null;
+    if (!nm) return;
 
     setSaving(true);
     try {
-      const res = await createProduct({ name: n, sku: k });
-      const created = (res as any).product as {
-        id: string;
-        name: string;
-        sku: string | null;
-        isActive: boolean;
-      };
+      const res = await createProduct({ name: nm, sku: sk });
+      const created = (res as any)?.product;
+      if (!created?.id) throw new Error("CREATE_FAILED");
 
-      // New products have no inventory entries yet → stock defaults to 0
-      const row: ProductRow = {
-        id: created.id,
-        name: created.name,
-        sku: created.sku,
-        isActive: created.isActive,
-        stock: 0,
-        asOfDateISO: null,
-      };
+      setProducts((prev) => [
+        {
+          id: created.id,
+          name: created.name,
+          sku: created.sku,
+          isActive: created.isActive,
+          stock: 0,
+          asOfDateISO: null,
+        },
+        ...prev,
+      ]);
 
-      setProducts((prev) => [row, ...prev]);
       setName("");
       setSku("");
     } finally {
@@ -221,13 +215,13 @@ export default function ProductsClient({
   }
 
   async function onToggleActive(productId: string, next: boolean) {
-    // Optimistic UI
+    if (!isAdmin) return;
+
     setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, isActive: next } : p)));
 
     try {
       await setProductActive({ productId, isActive: next });
     } catch {
-      // revert on failure
       setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, isActive: !next } : p)));
     }
   }
@@ -235,250 +229,282 @@ export default function ProductsClient({
   const showBanner = stats.low > 0 || stats.out > 0;
 
   return (
-    <Box sx={{ maxWidth: 1100, mx: "auto" }}>
-      <Stack spacing={2.5}>
-        <Box>
-          <Typography variant="h5" fontWeight={800}>
-            Products
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Add products and manage Active/Inactive status. View current stock per store (latest inventory entry).
-          </Typography>
-        </Box>
-
-        {/* Optional enhancement: low-stock summary banner + quick filters */}
-        {showBanner && (
-          <Alert
-            severity={stats.out > 0 ? "error" : "warning"}
-            sx={{ borderRadius: 2 }}
-            action={
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Button
-                  size="small"
-                  variant={quickFilter === "OUT" ? "contained" : "outlined"}
-                  color="error"
-                  onClick={() => setQuickFilter((p) => (p === "OUT" ? "ALL" : "OUT"))}
-                >
-                  OUT ({stats.out})
-                </Button>
-                <Button
-                  size="small"
-                  variant={quickFilter === "LOW" ? "contained" : "outlined"}
-                  color="warning"
-                  onClick={() => setQuickFilter((p) => (p === "LOW" ? "ALL" : "LOW"))}
-                >
-                  LOW ({stats.low})
-                </Button>
-                <Button
-                  size="small"
-                  variant={quickFilter === "ALL" ? "contained" : "outlined"}
-                  onClick={() => setQuickFilter("ALL")}
-                >
-                  Show all
-                </Button>
-              </Stack>
-            }
-          >
-            <Typography variant="body2">
-              {stats.out > 0 && stats.low > 0
-                ? `${stats.out} product(s) are OUT of stock and ${stats.low} product(s) are LOW on stock for this store.`
-                : stats.out > 0
-                ? `${stats.out} product(s) are OUT of stock for this store.`
-                : `${stats.low} product(s) are LOW on stock for this store.`}{" "}
-              Threshold: LOW ≤ {Math.max(0, Math.floor(lowThreshold))}.
+    <>
+      <PageShell
+        title="Products"
+        subtitle="Add products and manage Active/Inactive status. View current stock per store (latest inventory entry)."
+        headerLeft={
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 42 }}>
+              Store
             </Typography>
-          </Alert>
-        )}
-
-        <Paper sx={{ p: 2.5, borderRadius: 2 }}>
-          <Stack spacing={2}>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1.5}
-              alignItems={{ xs: "stretch", sm: "center" }}
-            >
-              <FormControl sx={{ width: { xs: "100%", sm: 320 } }}>
-                <InputLabel id="store-select-label">Store</InputLabel>
-                <Select
-                  labelId="store-select-label"
-                  value={storeId}
-                  label="Store"
-                  onChange={(e) => onChangeStore(String(e.target.value))}
-                  disabled={stores.length === 0}
-                >
-                  {stores.map((s) => (
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <Select
+                value={storeId}
+                onChange={(e) => onChangeStore(String(e.target.value))}
+                displayEmpty
+                disabled={isPending || stores.length === 0}
+              >
+                {stores.length === 0 ? (
+                  <MenuItem value="">
+                    <em>No stores</em>
+                  </MenuItem>
+                ) : (
+                  stores.map((s) => (
                     <MenuItem key={s.id} value={s.id}>
                       {s.name}
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                  ))
+                )}
+              </Select>
+            </FormControl>
 
-              <Typography variant="body2" color="text.secondary">
-                {loadingStock
-                  ? "Loading stock..."
-                  : "Stock is based on the latest saved inventory entry for the selected store."}
+            {loadingStock && (
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                Loading…
               </Typography>
-            </Stack>
+            )}
+          </Stack>
+        }
+        headerRight={
+          <Stack direction="row" spacing={1.25} alignItems="center" justifyContent="flex-end">
+            <Chip
+              size="small"
+              label={`Store: ${storeName}`}
+              variant="outlined"
+              sx={(theme) => ({
+                borderColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.18)" : theme.palette.divider,
+                color: theme.palette.text.secondary,
+              })}
+            />
 
-            <Divider />
-
-            {/* Optional enhancement: configurable LOW threshold */}
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1.5}
-              alignItems={{ xs: "stretch", sm: "center" }}
-            >
-              <TextField
-                label="LOW threshold"
-                type="number"
-                value={lowThreshold}
-                onChange={(e) => setLowThreshold(Number(e.target.value))}
-                inputProps={{ min: 0, step: 1 }}
-                sx={{ width: { xs: "100%", sm: 200 } }}
-                helperText={thresholdsText}
+            {!!stats.out && (
+              <Chip
+                size="small"
+                label={`OUT (${stats.out})`}
+                color="error"
+                variant={quickFilter === "OUT" ? "filled" : "outlined"}
+                onClick={() => setQuickFilter(quickFilter === "OUT" ? "ALL" : "OUT")}
+                sx={{ fontWeight: 900 }}
               />
-
-              {/* Sorting by stock */}
-              <FormControl sx={{ width: { xs: "100%", sm: 260 } }}>
-                <InputLabel id="sort-select-label">Sort</InputLabel>
-                <Select
-                  labelId="sort-select-label"
-                  value={sortMode}
-                  label="Sort"
-                  onChange={(e) => setSortMode(e.target.value as SortMode)}
-                >
-                  <MenuItem value="NAME_ASC">Name (A → Z)</MenuItem>
-                  <MenuItem value="STOCK_DESC">Stock (High → Low)</MenuItem>
-                  <MenuItem value="STOCK_ASC">Stock (Low → High)</MenuItem>
-                  <MenuItem value="STATUS">Status (OUT → LOW → OK)</MenuItem>
-                </Select>
-              </FormControl>
-
-              <Typography variant="body2" color="text.secondary">
-                Tip: Use the banner buttons to focus on LOW/OUT products.
-              </Typography>
-            </Stack>
-
-            <Divider />
-
-            <Typography variant="subtitle1" fontWeight={700}>
-              Add product
-            </Typography>
-
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <TextField
-                label="Product name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                fullWidth
+            )}
+            {!!stats.low && (
+              <Chip
+                size="small"
+                label={`LOW (${stats.low})`}
+                color="warning"
+                variant={quickFilter === "LOW" ? "filled" : "outlined"}
+                onClick={() => setQuickFilter(quickFilter === "LOW" ? "ALL" : "LOW")}
+                sx={{ fontWeight: 900 }}
               />
-              <TextField
-                label="SKU (optional)"
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                sx={{ width: { xs: "100%", sm: 240 } }}
-              />
+            )}
+
+            {(stats.low > 0 || stats.out > 0) && (
               <Button
-                variant="contained"
-                onClick={onAdd}
-                disabled={saving || !name.trim()}
-                sx={{ minWidth: 140, borderRadius: 2 }}
+                variant="outlined"
+                onClick={() => setQuickFilter("ALL")}
+                disabled={quickFilter === "ALL"}
+                sx={{ borderRadius: 2, minWidth: 110 }}
               >
-                {saving ? "Saving..." : "Add"}
+                Show All
               </Button>
+            )}
+          </Stack>
+        }
+      >
+        {showBanner && (
+          <Alert
+            severity={stats.out > 0 ? "error" : "warning"}
+            sx={{
+              mb: 2,
+              borderRadius: 2,
+              "& .MuiAlert-message": { width: "100%" },
+            }}
+          >
+            {stats.out > 0
+              ? `${stats.out} product(s) are OUT of stock`
+              : "No OUT of stock items"}
+            {stats.low > 0 ? ` and ${stats.low} product(s) are LOW on stock` : ""}
+            {`. Threshold: LOW ≤ ${Math.max(0, Math.floor(lowThreshold))}.`}
+          </Alert>
+        )}
+
+        <SectionCard title="Product Controls" tip="Tip: Use the banner buttons to focus on LOW/OUT products.">
+          <Stack spacing={2}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={1.5}
+              alignItems={{ xs: "stretch", md: "center" }}
+            >
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 102 }}>
+                  LOW threshold
+                </Typography>
+                <TextField
+                  value={String(lowThreshold)}
+                  onChange={(e) => setLowThreshold(Math.max(0, Math.floor(n(e.target.value))))}
+                  size="small"
+                  inputProps={{ inputMode: "numeric" }}
+                  sx={{ width: 120 }}
+                />
+              </Stack>
+
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 36 }}>
+                  Sort
+                </Typography>
+                <FormControl size="small" sx={{ minWidth: 220 }}>
+                  <Select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
+                    <MenuItem value="NAME_ASC">Name (A → Z)</MenuItem>
+                    <MenuItem value="STATUS">Status (OUT → LOW → OK)</MenuItem>
+                    <MenuItem value="STOCK_DESC">Stock (High → Low)</MenuItem>
+                    <MenuItem value="STOCK_ASC">Stock (Low → High)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+
+              <Box sx={{ flexGrow: 1 }} />
+
+              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
+                Stock is based on the latest saved inventory entry for the selected store.
+              </Typography>
             </Stack>
 
-            <Divider />
+            <Divider sx={{ opacity: 0.6 }} />
 
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="center">
-              <TextField label="Search" value={q} onChange={(e) => setQ(e.target.value)} fullWidth />
+            {isAdmin && (
+              <>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                  Add product
+                </Typography>
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems="stretch">
+                  <TextField
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Product name"
+                    size="small"
+                    fullWidth
+                    disabled={isPending || saving}
+                  />
+                  <TextField
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="SKU (optional)"
+                    size="small"
+                    sx={{ width: { xs: "100%", md: 220 } }}
+                    disabled={isPending || saving}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={onAdd}
+                    disabled={isPending || saving || !name.trim()}
+                    sx={{ borderRadius: 2, minWidth: 140 }}
+                  >
+                    {saving ? "Adding..." : "Add"}
+                  </Button>
+                </Stack>
+
+                <Divider sx={{ opacity: 0.6 }} />
+              </>
+            )}
+
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems="center">
+              <TextField
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search"
+                size="small"
+                fullWidth
+                disabled={isPending}
+              />
               <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
                 {viewRows.length} item(s)
               </Typography>
             </Stack>
           </Stack>
-        </Paper>
+        </SectionCard>
 
-        <Paper sx={{ borderRadius: 2, overflow: "hidden" }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 220 }}>SKU</TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 120 }} align="right">
-                  Stock
-                </TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 140 }} align="center">
-                  Status
-                </TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 140 }}>
-                  As of
-                </TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 140 }}>Active</TableCell>
-              </TableRow>
-            </TableHead>
+        <SectionCard title="Product List" tip="Tip: LOW/OUT status is computed from the latest stock.">
+          <ResponsiveTable minWidth={980}>
+            <Table size="small" sx={{ minWidth: "inherit" }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 220 }}>SKU</TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 120 }} align="right">
+                    Stock
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }} align="center">
+                    Status
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }}>As of</TableCell>
+                  <TableCell sx={{ fontWeight: 800, width: 140 }}>Active</TableCell>
+                </TableRow>
+              </TableHead>
 
-            <TableBody>
-              {viewRows.map((p) => {
-                const st = statusOf(p.stock);
+              <TableBody>
+                {viewRows.map((p) => {
+                  const st = statusOf(n(p.stock));
 
-                return (
-                  <TableRow key={p.id} hover>
-                    <TableCell>{p.name}</TableCell>
-                    <TableCell>{p.sku ?? "-"}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
-                      {p.stock}
-                    </TableCell>
+                  return (
+                    <TableRow key={p.id} hover>
+                      <TableCell sx={{ fontWeight: 650 }}>{p.name}</TableCell>
+                      <TableCell>{p.sku ?? "-"}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                        {n(p.stock)}
+                      </TableCell>
 
-                    <TableCell align="center">
-                      {/* Optional enhancement: tooltip + pulsing OUT */}
-                      <Tooltip title={st.tooltip} arrow placement="top">
-                        <Chip
-                          label={st.label}
-                          color={st.color}
-                          size="small"
-                          sx={{
-                            fontWeight: 800,
-                            ...(st.isPulsing
-                              ? {
-                                  "@keyframes pulseOut": {
-                                    "0%": { transform: "scale(1)", opacity: 1 },
-                                    "50%": { transform: "scale(1.05)", opacity: 0.75 },
-                                    "100%": { transform: "scale(1)", opacity: 1 },
-                                  },
-                                  animation: "pulseOut 1.1s ease-in-out infinite",
-                                }
-                              : null),
-                          }}
+                      <TableCell align="center">
+                        <Tooltip title={st.tooltip} arrow>
+                          <Chip
+                            label={st.label}
+                            color={st.color}
+                            size="small"
+                            sx={{
+                              fontWeight: 900,
+                              ...(st.isPulsing
+                                ? {
+                                    "@keyframes pulseOut": {
+                                      "0%": { transform: "scale(1)", opacity: 1 },
+                                      "50%": { transform: "scale(1.05)", opacity: 0.75 },
+                                      "100%": { transform: "scale(1)", opacity: 1 },
+                                    },
+                                    animation: "pulseOut 1.1s ease-in-out infinite",
+                                  }
+                                : null),
+                            }}
+                          />
+                        </Tooltip>
+                      </TableCell>
+
+                      <TableCell>{p.asOfDateISO ?? "-"}</TableCell>
+
+                      <TableCell>
+                        <Switch
+                          checked={!!p.isActive}
+                          onChange={(e) => onToggleActive(p.id, e.target.checked)}
+                          disabled={!isAdmin || isPending}
                         />
-                      </Tooltip>
-                    </TableCell>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
 
-                    <TableCell>{p.asOfDateISO ?? "-"}</TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={p.isActive}
-                        onChange={(e) => onToggleActive(p.id, e.target.checked)}
-                      />
+                {viewRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        No products found.
+                      </Typography>
                     </TableCell>
                   </TableRow>
-                );
-              })}
-
-              {viewRows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <Typography variant="body2" color="text.secondary">
-                      No products found.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Paper>
-      </Stack>
-    </Box>
+                )}
+              </TableBody>
+            </Table>
+          </ResponsiveTable>
+        </SectionCard>
+      </PageShell>
+    </>
   );
 }

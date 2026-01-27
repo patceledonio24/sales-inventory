@@ -55,7 +55,7 @@ async function computeRange(storeId: string, from: Date, to: Date): Promise<{ su
 
   const remits = await prisma.dailyRemittance.findMany({
     where: { storeId, date: { gte: from, lte: to } },
-    select: { date: true, cash: true, gcash: true },
+    select: { date: true, cash: true, gcash: true, discountedQty: true },
   });
 
   const expenses = await prisma.dailyExpense.findMany({
@@ -63,23 +63,30 @@ async function computeRange(storeId: string, from: Date, to: Date): Promise<{ su
     select: { date: true, amount: true },
   });
 
-  const byDay = new Map<string, { sales: number; cash: number; gcash: number; expenses: number }>();
+  const byDay = new Map<
+    string,
+    { salesGross: number; discountQty: number; cash: number; gcash: number; expenses: number }
+  >();
+
   const ensure = (k: string) => {
-    if (!byDay.has(k)) byDay.set(k, { sales: 0, cash: 0, gcash: 0, expenses: 0 });
+    if (!byDay.has(k)) byDay.set(k, { salesGross: 0, discountQty: 0, cash: 0, gcash: 0, expenses: 0 });
     return byDay.get(k)!;
   };
 
+  // Gross sales from inventory (qty × SRP)
   for (const r of entries) {
     const k = isoDateOnly(r.date);
     const qty = Number(r.salesQty ?? 0);
     const srp = decimalToNumber(r.srpSnapshot, 0);
-    ensure(k).sales += qty * srp;
+    ensure(k).salesGross += (Number.isFinite(qty) ? qty : 0) * srp;
   }
 
+  // Remittance + discount qty (captured at remittance level)
   for (const r of remits) {
     const k = isoDateOnly(r.date);
     ensure(k).cash += decimalToNumber(r.cash, 0);
     ensure(k).gcash += decimalToNumber(r.gcash, 0);
+    ensure(k).discountQty += Math.max(0, Number((r as any).discountedQty ?? 0));
   }
 
   for (const r of expenses) {
@@ -92,11 +99,14 @@ async function computeRange(storeId: string, from: Date, to: Date): Promise<{ su
     const d = addDaysUTC(from, i);
     const k = isoDateOnly(d);
     const v = ensure(k);
-    const net = v.sales - v.expenses;
+
+    const discountAmount = v.discountQty * 9;
+    const salesNet = v.salesGross - discountAmount;
+    const net = salesNet - v.expenses;
 
     return {
       date: k,
-      sales: fmt2(v.sales),
+      sales: fmt2(salesNet),
       cash: fmt2(v.cash),
       gcash: fmt2(v.gcash),
       expenses: fmt2(v.expenses),

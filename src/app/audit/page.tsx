@@ -34,7 +34,7 @@ export default async function AuditPage({
   const rem = storeId
     ? await prisma.dailyRemittance.findUnique({
         where: { storeId_date: { storeId, date } },
-        select: { cash: true, gcash: true, notes: true },
+        select: { cash: true, gcash: true, discountedQty: true, notes: true },
       })
     : null;
 
@@ -54,11 +54,15 @@ export default async function AuditPage({
       })
     : [];
 
-  const totalSales = salesRows.reduce((sum, r) => {
+  const totalSalesGross = salesRows.reduce((sum, r) => {
     const qty = Number(r.salesQty ?? 0);
     const srp = decimalToNumber(r.srpSnapshot, 0);
     return sum + (Number.isFinite(qty) ? qty : 0) * srp;
   }, 0);
+
+  const discountQty = rem ? Math.max(0, Number((rem as any).discountedQty ?? 0)) : 0;
+  const discountAmount = discountQty * 9;
+  const totalSales = totalSalesGross - discountAmount;
 
   const cash = rem ? decimalToNumber(rem.cash, 0) : 0;
   const gcash = rem ? decimalToNumber(rem.gcash, 0) : 0;

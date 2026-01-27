@@ -80,8 +80,9 @@ model DailyInventoryEntry {
 
   beginQty    Int @default(0)
   incomingQty Int @default(0)
-  salesQty    Int @default(0)
-  endQty      Int @default(0)
+  salesQty       Int @default(0)
+  discountedQty Int @default(0)
+  endQty         Int @default(0)
 
   lpSnapshot  Decimal @default(0.00) @db.Decimal(12, 2)
   srpSnapshot Decimal @default(0.00) @db.Decimal(12, 2)
@@ -102,9 +103,10 @@ model DailyRemittance {
   storeId String
   date    DateTime @db.Date
 
-  cash  Decimal @default(0.00) @db.Decimal(12, 2)
-  gcash Decimal @default(0.00) @db.Decimal(12, 2)
-  notes String?
+  cash          Decimal @default(0.00) @db.Decimal(12, 2)
+  gcash         Decimal @default(0.00) @db.Decimal(12, 2)
+  discountedQty Int     @default(0)
+  notes         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -129,4 +131,17 @@ model DailyExpense {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([storeId, date])
+}
+
+model ExpenseSuggestion {
+  id         String   @id @default(cuid())
+  storeId    String
+  text       String
+  usageCount Int      @default(1)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([storeId, text])
+  @@index([storeId, usageCount, lastUsedAt])
 }

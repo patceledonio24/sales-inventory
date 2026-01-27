@@ -46,6 +46,7 @@ export default async function RemittancePage({
     dateISO: string;
     cash: string;
     gcash: string;
+    discountedQty: string;
     notes: string;
   };
 
@@ -53,7 +54,7 @@ export default async function RemittancePage({
     const date = new Date(initialDateISO + "T00:00:00.000Z");
     const row = await prisma.dailyRemittance.findUnique({
       where: { storeId_date: { storeId: initialStoreId, date } },
-      select: { cash: true, gcash: true, notes: true },
+      select: { cash: true, gcash: true, discountedQty: true, notes: true },
     });
 
     if (row) {
@@ -62,6 +63,7 @@ export default async function RemittancePage({
         dateISO: initialDateISO,
         cash: decimalToString(row.cash),
         gcash: decimalToString(row.gcash),
+        discountedQty: String((row as any).discountedQty ?? 0),
         notes: row.notes ?? "",
       };
     }

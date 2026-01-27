@@ -1,17 +1,47 @@
 "use server";
 
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 
-function assertRole(role: unknown): role is "ADMIN" | "STAFF" {
-  return role === "ADMIN" || role === "STAFF";
+function safeISODate(s: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
 }
 
-function toMoneyString(v: unknown) {
-  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
-  if (!Number.isFinite(n)) return "0.00";
-  return n.toFixed(2);
+function toPlainExpense(row: any) {
+  return {
+    id: String(row.id),
+    description: String(row.description),
+    amount: row.amount.toString(), // ✅ Decimal → string
+  };
+}
+
+export async function searchExpenseSuggestions(args: {
+  storeId: string;
+  q: string;
+  limit?: number;
+}) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+
+  const storeId = args.storeId.trim();
+  const q = args.q.trim();
+  const limit = Math.min(args.limit ?? 8, 20);
+
+  if (!storeId || !q) return { ok: true, items: [] };
+
+  const rows = await prisma.dailyExpense.findMany({
+    where: {
+      storeId,
+      description: { contains: q, mode: "insensitive" },
+    },
+    distinct: ["description"],
+    take: limit,
+    select: { description: true },
+  });
+
+  return { ok: true, items: rows.map((r) => r.description) };
 }
 
 export async function addExpense(args: {
@@ -21,43 +51,41 @@ export async function addExpense(args: {
   amount: string;
 }) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as any)?.role;
+  if (!session?.user) throw new Error("UNAUTHORIZED");
 
-  if (!session?.user || !assertRole(role)) throw new Error("UNAUTHORIZED");
-  if (!args.storeId || !args.dateISO) throw new Error("INVALID_INPUT");
+  const storeId = args.storeId.trim();
+  const dateISO = safeISODate(args.dateISO);
+  const description = args.description.trim();
+  const amount = args.amount.toString();
 
-  const desc = args.description?.trim();
-  if (!desc) throw new Error("DESCRIPTION_REQUIRED");
+  if (!storeId || !dateISO) throw new Error("INVALID_INPUT");
+  if (!description) throw new Error("DESCRIPTION_REQUIRED");
 
-  const date = new Date(args.dateISO + "T00:00:00.000Z");
-  if (Number.isNaN(date.getTime())) throw new Error("INVALID_DATE");
+  const date = new Date(`${dateISO}T00:00:00.000Z`);
 
   const created = await prisma.dailyExpense.create({
     data: {
-      storeId: args.storeId,
+      storeId,
       date,
-      description: desc,
-      amount: toMoneyString(args.amount),
+      description,
+      amount, // Prisma Decimal accepts string
     },
-    select: { id: true, description: true, amount: true },
+    select: {
+      id: true,
+      description: true,
+      amount: true,
+    },
   });
 
-  return {
-    ok: true,
-    row: {
-      id: created.id,
-      description: created.description,
-      amount: String(created.amount), // Decimal -> string is safe enough here
-    },
-  };
+  // 🚨 THIS IS THE CRITICAL LINE
+  const row = toPlainExpense(created);
+
+  return { ok: true, row };
 }
 
 export async function deleteExpense(args: { id: string }) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as any)?.role;
-
-  if (!session?.user || !assertRole(role)) throw new Error("UNAUTHORIZED");
-  if (!args.id) throw new Error("INVALID_INPUT");
+  if (!session?.user) throw new Error("UNAUTHORIZED");
 
   await prisma.dailyExpense.delete({ where: { id: args.id } });
   return { ok: true };

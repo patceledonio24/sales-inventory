@@ -80,7 +80,7 @@ export default async function InventoryPage({
     srp: decimalToString(p.srp),
   }));
 
-  // Match InventoryClient's expected Entry shape (no snapshot fields)
+  // Match InventoryClient's expected Entry shape
   const safeEntries = entries.map((e) => ({
     productId: e.productId,
     beginQty: e.beginQty,

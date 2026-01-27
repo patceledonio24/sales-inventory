@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "seed:staff": "tsx scripts/seed-staff.ts",
+    "seed:pricing": "tsx scripts/seed-pricing-basics.ts",
+    "seed:all": "npm run seed:admin && npm run seed:staff && npm run seed:pricing"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -36,6 +40,7 @@
     "eslint-config-next": "16.1.4",
     "prisma": "^7.3.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

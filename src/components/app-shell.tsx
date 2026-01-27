@@ -10,6 +10,7 @@ import {
   CssBaseline,
   Divider,
   Drawer,
+  IconButton,
   List,
   ListItemButton,
   ListItemIcon,
@@ -23,6 +24,8 @@ import {
   MenuItem,
   Paper,
   Avatar,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 
 import HomeIcon from "@mui/icons-material/Home";
@@ -36,6 +39,7 @@ import FactCheckIcon from "@mui/icons-material/FactCheck";
 import LogoutIcon from "@mui/icons-material/Logout";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
+import MenuIcon from "@mui/icons-material/Menu";
 
 const drawerWidth = 260;
 
@@ -55,7 +59,6 @@ function ThemeToggle(props: {
 }) {
   const { mounted, mode, onToggle } = props;
 
-  // Hydration-safe placeholder until mounted
   if (!mounted) {
     return (
       <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.85 }}>
@@ -74,16 +77,19 @@ function ThemeToggle(props: {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  // Hooks must always run in the same order
   const pathname = usePathname();
   const { data: session, status } = useSession();
 
+  const theme = useTheme();
+  const isMobileOrTablet = useMediaQuery(theme.breakpoints.down("md"));
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+
   const isAuthed = status === "authenticated";
-  const isAdmin = isAuthed && (session?.user as any)?.role === "ADMIN";
+  const role = (session?.user as any)?.role as "ADMIN" | "STAFF" | undefined;
+  const isAdmin = isAuthed && role === "ADMIN";
 
   const [mounted, setMounted] = React.useState(false);
   const [mode, setMode] = React.useState<"light" | "dark">("light");
-
   const [storeChoice, setStoreChoice] = React.useState<StoreChoice>("MR_LIEMPO");
 
   React.useEffect(() => {
@@ -91,21 +97,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     try {
       const stored = localStorage.getItem(MODE_KEY);
       if (stored === "light" || stored === "dark") setMode(stored);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   const toggleMode = () => {
     const next = mode === "dark" ? "light" : "dark";
     try {
       localStorage.setItem(MODE_KEY, next);
-    } catch {
-      // ignore
-    }
+    } catch {}
     setMode(next);
-
-    // Theme is derived from localStorage in Providers, so reload is the simplest.
     window.location.reload();
   };
 
@@ -114,34 +114,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     try {
       const saved = localStorage.getItem(STORE_KEY) as StoreChoice | null;
       if (saved === "MR_LIEMPO" || saved === "COMMISSARY") setStoreChoice(saved);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [isAdmin]);
 
   const handleStoreChange = (next: StoreChoice) => {
     setStoreChoice(next);
     try {
       localStorage.setItem(STORE_KEY, next);
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  // ✅ STAFF now includes Remittance + Expenses
+  // ✅ MR_LIEMPO navigation:
+  // - Products is now visible to BOTH ADMIN and STAFF
+  // - Audit + Reports remain ADMIN-only
   const navItemsMrLiempo = [
     { href: "/", label: "Home", icon: <HomeIcon /> },
     { href: "/input/inventory", label: "Inventory Input", icon: <InventoryIcon /> },
     { href: "/input/pricing", label: "Pricing", icon: <PriceIcon /> },
-
-    // STAFF + ADMIN
     { href: "/input/remittance", label: "Remittance", icon: <PaymentsIcon /> },
     { href: "/input/expenses", label: "Petty Cash / Expenses", icon: <ReceiptLongIcon /> },
 
-    // ADMIN only
+    // ✅ visible to both roles
+    { href: "/input/products", label: "Products", icon: <CategoryIcon /> },
+
+    // ✅ admin-only
     ...(isAdmin
       ? [
-          { href: "/input/products", label: "Products", icon: <CategoryIcon /> },
           { href: "/audit", label: "Audit Log", icon: <FactCheckIcon /> },
           { href: "/reports/weekly", label: "Reports", icon: <BarChartIcon /> },
         ]
@@ -149,42 +147,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const navItemsCommissary = [{ href: "/", label: "Commissary Home", icon: <HomeIcon /> }];
-
-  const navItems =
-    isAdmin && storeChoice === "COMMISSARY" ? navItemsCommissary : navItemsMrLiempo;
-
-  const renderMainContent = () => {
-    if (isAdmin && storeChoice === "COMMISSARY") {
-      return (
-        <Box sx={{ maxWidth: 980 }}>
-          <Paper sx={{ p: 3, borderRadius: 2 }}>
-            <Typography variant="h5" fontWeight={700}>
-              Commissary Dashboard (Coming Soon)
-            </Typography>
-            <Typography sx={{ mt: 1 }}>
-              You selected <strong>Commissary</strong>. This will have a different dashboard and
-              sidebar. We’ll implement it later.
-            </Typography>
-            <Typography sx={{ mt: 1 }} color="text.secondary">
-              Switch back to <strong>Mr. Liempo</strong> to use Inventory / Pricing / Reports.
-            </Typography>
-          </Paper>
-        </Box>
-      );
-    }
-    return children;
-  };
+  const navItems = isAdmin && storeChoice === "COMMISSARY" ? navItemsCommissary : navItemsMrLiempo;
 
   const isLoginPage = pathname === "/login";
-
-  // LOGIN: no sidebar/topbar, but show theme toggle
   if (isLoginPage) {
     return (
       <Box sx={{ minHeight: "100vh" }}>
         <CssBaseline />
-
         <Paper
-          elevation={0}
           sx={{
             position: "fixed",
             top: 16,
@@ -199,7 +169,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         >
           <ThemeToggle mounted={mounted} mode={mode} onToggle={toggleMode} />
         </Paper>
-
         {children}
       </Box>
     );
@@ -207,94 +176,122 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const storeMeta = STORE_META[storeChoice];
 
+  const drawerContent = (
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <List>
+        {navItems.map((item) => (
+          <ListItemButton
+            key={item.href}
+            component={Link}
+            href={item.href}
+            selected={pathname === item.href}
+            onClick={() => isMobileOrTablet && setMobileOpen(false)}
+          >
+            <ListItemIcon>{item.icon}</ListItemIcon>
+            <ListItemText primary={item.label} />
+          </ListItemButton>
+        ))}
+      </List>
+
+      <Box sx={{ flexGrow: 1 }} />
+      <Divider />
+
+      <Box sx={{ p: 2 }}>
+        <ListItemButton onClick={() => signOut({ callbackUrl: "/login" })}>
+          <ListItemIcon>
+            <LogoutIcon />
+          </ListItemIcon>
+          <ListItemText primary="Sign out" />
+        </ListItemButton>
+      </Box>
+    </Box>
+  );
+
   return (
     <Box sx={{ display: "flex" }}>
       <CssBaseline />
 
       {/* Top Bar */}
       <AppBar position="fixed" sx={{ zIndex: (t) => t.zIndex.drawer + 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
-          <Typography variant="h6" noWrap>
-            Sales Inventory App
-          </Typography>
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 }, gap: 1.5 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            {isMobileOrTablet && (
+              <IconButton onClick={() => setMobileOpen(true)}>
+                <MenuIcon />
+              </IconButton>
+            )}
 
-          <Stack direction="row" spacing={2.5} alignItems="center">
+            <Typography variant="h6" noWrap sx={{ display: { xs: "none", sm: "block" } }}>
+              Sales Inventory App
+            </Typography>
+          </Stack>
+
+          <Box sx={{ flexGrow: 1 }} />
+
+          <Stack direction="row" spacing={1} alignItems="center">
             {isAdmin && (
-              <Stack direction="row" spacing={1.5} alignItems="center">
-                <Avatar
-                  src={storeMeta.logo}
-                  alt={storeMeta.label}
-                  sx={{
-                    width: 40,
-                    height: 40,
-                    border: "1px solid rgba(0,0,0,0.12)",
-                  }}
-                />
-                <Typography fontWeight={700} sx={{ lineHeight: 1 }}>
-                  {storeMeta.label}
-                </Typography>
+              <>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  sx={{ display: { xs: "none", sm: "flex" } }}
+                >
+                  <Avatar src={storeMeta.logo} alt={storeMeta.label} />
+                  <Typography fontWeight={700} noWrap>
+                    {storeMeta.label}
+                  </Typography>
+                </Stack>
 
-                <FormControl size="small">
+                <FormControl size="small" sx={{ minWidth: 150 }}>
                   <Select
                     value={storeChoice}
                     onChange={(e) => handleStoreChange(e.target.value as StoreChoice)}
-                    sx={{ minWidth: 160 }}
                   >
                     <MenuItem value="MR_LIEMPO">Mr. Liempo</MenuItem>
                     <MenuItem value="COMMISSARY">Commissary</MenuItem>
                   </Select>
                 </FormControl>
-              </Stack>
+              </>
             )}
 
-            {/* STAFF + ADMIN */}
             {isAuthed && <ThemeToggle mounted={mounted} mode={mode} onToggle={toggleMode} />}
           </Stack>
         </Toolbar>
       </AppBar>
 
       {/* Sidebar */}
-      <Drawer
-        variant="permanent"
+      {isMobileOrTablet ? (
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
+          sx={{ [`& .MuiDrawer-paper`]: { width: drawerWidth } }}
+        >
+          <Toolbar />
+          {drawerContent}
+        </Drawer>
+      ) : (
+        <Drawer
+          variant="permanent"
+          sx={{ width: drawerWidth, [`& .MuiDrawer-paper`]: { width: drawerWidth } }}
+        >
+          <Toolbar />
+          {drawerContent}
+        </Drawer>
+      )}
+
+      {/* Main */}
+      <Box
+        component="main"
         sx={{
-          width: drawerWidth,
-          [`& .MuiDrawer-paper`]: { width: drawerWidth },
+          flexGrow: 1,
+          p: { xs: 2, sm: 2.5, md: 3 },
+          width: { md: `calc(100% - ${drawerWidth}px)` },
         }}
       >
         <Toolbar />
-        <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-          <List>
-            {navItems.map((item) => (
-              <ListItemButton
-                key={item.href}
-                component={Link}
-                href={item.href}
-                selected={pathname === item.href}
-              >
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            ))}
-          </List>
-
-          <Box sx={{ flexGrow: 1 }} />
-          <Divider />
-
-          <Box sx={{ p: 2 }}>
-            <ListItemButton onClick={() => signOut({ callbackUrl: "/login" })}>
-              <ListItemIcon>
-                <LogoutIcon />
-              </ListItemIcon>
-              <ListItemText primary="Sign out" />
-            </ListItemButton>
-          </Box>
-        </Box>
-      </Drawer>
-
-      {/* Main */}
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
-        <Toolbar />
-        {renderMainContent()}
+        {children}
       </Box>
     </Box>
   );

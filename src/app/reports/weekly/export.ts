@@ -17,13 +17,7 @@ export async function exportWeeklyCSV() {
 
   // ===== Server-owned week range (last 7 days, UTC) =====
   const today = new Date();
-  const end = new Date(
-    Date.UTC(
-      today.getUTCFullYear(),
-      today.getUTCMonth(),
-      today.getUTCDate()
-    )
-  );
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   const start = new Date(end);
   start.setUTCDate(end.getUTCDate() - 6);
 
@@ -47,23 +41,30 @@ export async function exportWeeklyCSV() {
     },
   });
 
-  // ===== Fetch products separately =====
-  const products = await prisma.product.findMany({
+  // ===== Fetch total discount qty from remittances for the same range =====
+  const remits = await prisma.dailyRemittance.findMany({
+    where: {
+      date: {
+        gte: start,
+        lte: new Date(end.getTime() + 24 * 60 * 60 * 1000 - 1),
+      },
+    },
     select: {
-      id: true,
-      name: true,
+      discountedQty: true,
     },
   });
 
-  const productNameById = new Map(
-    products.map((p) => [p.id, p.name])
-  );
+  const discountTotal = remits.reduce((s, r) => s + Math.max(0, Number((r as any).discountedQty ?? 0)) * 9, 0);
 
-  // ===== Aggregate by PRODUCT =====
-  const map = new Map<
-    string,
-    { product: string; lp: number; srp: number; rev: number; qty: number }
-  >();
+  // ===== Fetch products separately =====
+  const products = await prisma.product.findMany({
+    select: { id: true, name: true },
+  });
+
+  const productNameById = new Map(products.map((p) => [p.id, p.name]));
+
+  // ===== Aggregate by PRODUCT (gross, before day-level discount) =====
+  const map = new Map<string, { product: string; lp: number; srp: number; rev: number; qty: number }>();
 
   for (const r of entries) {
     const productName = productNameById.get(r.productId);
@@ -74,15 +75,7 @@ export async function exportWeeklyCSV() {
     const lp = decimalToNumber(r.lpSnapshot, 0);
     const rev = qty * srp;
 
-    const cur =
-      map.get(r.productId) ?? {
-        product: productName,
-        lp,
-        srp,
-        rev: 0,
-        qty: 0,
-      };
-
+    const cur = map.get(r.productId) ?? { product: productName, lp, srp, rev: 0, qty: 0 };
     cur.rev += rev;
     cur.qty += qty;
     map.set(r.productId, cur);
@@ -109,23 +102,41 @@ export async function exportWeeklyCSV() {
     (v.qty / DAYS).toFixed(2),
   ]);
 
-  const totalRev = body.reduce((s, r) => s + Number(r[3]), 0);
+  const grossTotalRev = body.reduce((s, r) => s + Number(r[3]), 0);
   const totalQty = body.reduce((s, r) => s + Number(r[5]), 0);
 
   body.push([
-    "TOTAL",
+    "TOTAL (GROSS)",
     "",
     "",
-    totalRev.toFixed(2),
+    grossTotalRev.toFixed(2),
     "",
     totalQty.toFixed(2),
     (totalQty / DAYS).toFixed(2),
   ]);
 
+  body.push([
+    "DISCOUNT (PWD/Senior)",
+    "",
+    "",
+    (-discountTotal).toFixed(2),
+    "",
+    "",
+    "",
+  ]);
+
+  body.push([
+    "TOTAL (NET)",
+    "",
+    "",
+    (grossTotalRev - discountTotal).toFixed(2),
+    "",
+    "",
+    "",
+  ]);
+
   const csv = [header, ...body]
-    .map((r) =>
-      r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")
-    )
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
     .join("\n");
 
   return {

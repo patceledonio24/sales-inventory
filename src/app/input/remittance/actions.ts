@@ -14,11 +14,18 @@ function toMoneyString(v: unknown) {
   return n.toFixed(2);
 }
 
+function toInt(v: unknown) {
+  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
+  const x = Number.isFinite(n) ? Math.floor(n) : 0;
+  return Math.max(0, x);
+}
+
 export async function saveDailyRemittance(args: {
   storeId: string;
   dateISO: string; // YYYY-MM-DD
   cash: string;
   gcash: string;
+  discountedQty?: string;
   notes?: string;
 }) {
   const session = await getServerSession(authOptions);
@@ -40,6 +47,7 @@ export async function saveDailyRemittance(args: {
     update: {
       cash: toMoneyString(args.cash),
       gcash: toMoneyString(args.gcash),
+      discountedQty: toInt(args.discountedQty),
       notes: args.notes?.trim() ? args.notes.trim() : null,
     },
     create: {
@@ -47,6 +55,7 @@ export async function saveDailyRemittance(args: {
       date,
       cash: toMoneyString(args.cash),
       gcash: toMoneyString(args.gcash),
+      discountedQty: toInt(args.discountedQty),
       notes: args.notes?.trim() ? args.notes.trim() : null,
     },
   });
