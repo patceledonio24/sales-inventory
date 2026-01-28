@@ -11,7 +11,7 @@
     "seed:staff": "tsx scripts/seed-staff.ts",
     "seed:pricing": "tsx scripts/seed-pricing-basics.ts",
     "seed:all": "npm run seed:admin && npm run seed:staff && npm run seed:pricing",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build"
+    "vercel-build": "prisma generate && prisma migrate deploy && ( [ \"$DB_ENV\" = \"dev\" ] && npm run seed:all || true ) && next build"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
