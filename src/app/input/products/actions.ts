@@ -3,7 +3,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 
 function assertAdmin(role: unknown): role is "ADMIN" {
   return role === "ADMIN";
