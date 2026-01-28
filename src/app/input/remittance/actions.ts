@@ -3,6 +3,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { todayISO } from "@/lib/today";
 
 function assertRole(role: unknown): role is "ADMIN" | "STAFF" {
   return role === "ADMIN" || role === "STAFF";
@@ -33,6 +34,11 @@ export async function saveDailyRemittance(args: {
 
   if (!session?.user || !assertRole(role)) throw new Error("UNAUTHORIZED");
   if (!args.storeId || !args.dateISO) throw new Error("INVALID_INPUT");
+
+  // STAFF can only save for "today" (Asia/Manila)
+  if (role === "STAFF" && args.dateISO !== todayISO("Asia/Manila")) {
+    throw new Error("STAFF_TODAY_ONLY");
+  }
 
   const date = new Date(args.dateISO + "T00:00:00.000Z");
   if (Number.isNaN(date.getTime())) throw new Error("INVALID_DATE");

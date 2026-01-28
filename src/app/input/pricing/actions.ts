@@ -4,8 +4,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-function assertRole(role: unknown): role is "ADMIN" | "STAFF" {
-  return role === "ADMIN" || role === "STAFF";
+function assertAdmin(role: unknown): role is "ADMIN" {
+  return role === "ADMIN";
 }
 
 function toPrice(v: string) {
@@ -23,7 +23,7 @@ export async function saveProductPrice(args: {
   const session = await getServerSession(authOptions);
   const role = (session?.user as any)?.role;
 
-  if (!session?.user || !assertRole(role)) {
+  if (!session?.user || !assertAdmin(role)) {
     throw new Error("UNAUTHORIZED");
   }
 
@@ -54,7 +54,7 @@ export async function saveProductPrices(args: {
   const session = await getServerSession(authOptions);
   const role = (session?.user as any)?.role;
 
-  if (!session?.user || !assertRole(role)) {
+  if (!session?.user || !assertAdmin(role)) {
     throw new Error("UNAUTHORIZED");
   }
 

@@ -39,6 +39,15 @@ function money2(v: number) {
   return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function todayISOManila() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 export default function ExpensesClient(props: {
   stores?: Store[];
   initialStoreId: string;
@@ -57,6 +66,8 @@ export default function ExpensesClient(props: {
 
   const [storeId, setStoreId] = useState<string>(safeInitialStoreId);
   const [dateISO, setDateISO] = useState<string>(safeInitialDateISO);
+
+  const staffLocked = props.isStaff && dateISO !== todayISOManila();
 
   const [rows, setRows] = useState<ExpenseRow[]>(props.initialRows ?? []);
 
@@ -146,6 +157,10 @@ export default function ExpensesClient(props: {
 
   // ===== ADD EXPENSE (with zero validation) =====
   async function onAdd() {
+    if (staffLocked) {
+      setSnack({ open: true, type: "error", message: "Staff can only add expenses for today." });
+      return;
+    }
     const d = desc.trim();
     const amt = toNum(amount || "0");
 
@@ -177,7 +192,15 @@ export default function ExpensesClient(props: {
             description: String((res.row as any).description ?? ""),
             amount: String((res.row as any).amount ?? "0"),
           };
-          setRows((prev) => [...prev, safeRow]);
+          setRows((prev) => {
+            const idx = prev.findIndex((r) => r.id === safeRow.id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = safeRow;
+              return next;
+            }
+            return [...prev, safeRow];
+          });
         } else {
           router.refresh();
         }
@@ -193,6 +216,11 @@ export default function ExpensesClient(props: {
         });
       } catch (e: any) {
         console.error(e);
+        const msg = typeof e?.message === "string" ? e.message : "";
+        if (msg === "STAFF_TODAY_ONLY") {
+          setSnack({ open: true, type: "error", message: "Staff can only add expenses for today." });
+          return;
+        }
         setSnack({
           open: true,
           type: "error",
@@ -203,13 +231,22 @@ export default function ExpensesClient(props: {
   }
 
   async function onDelete(id: string) {
+    if (staffLocked) {
+      setSnack({ open: true, type: "error", message: "Staff can only delete expenses for today." });
+      return;
+    }
     startTransition(async () => {
       try {
         const res = await deleteExpense({ id });
         if (!res?.ok) throw new Error("DELETE_FAILED");
         setRows((prev) => prev.filter((r) => r.id !== id));
         setSnack({ open: true, type: "success", message: "Expense deleted." });
-      } catch {
+      } catch (e: any) {
+        const msg = typeof e?.message === "string" ? e.message : "";
+        if (msg === "STAFF_TODAY_ONLY") {
+          setSnack({ open: true, type: "error", message: "Staff can only delete expenses for today." });
+          return;
+        }
         setSnack({ open: true, type: "error", message: "Failed to delete expense." });
       }
     });
@@ -263,6 +300,11 @@ export default function ExpensesClient(props: {
           </Stack>
         }
       >
+        {staffLocked && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Staff can only add/delete expenses for <b>today</b> ({todayISOManila()}).
+          </Alert>
+        )}
         <SectionCard title="Expense Entries" tip="Tip: Use suggestions for faster input.">
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ mb: 2 }}>
             <Autocomplete
@@ -278,6 +320,7 @@ export default function ExpensesClient(props: {
                   {...params}
                   placeholder="Expense description (e.g., Lalamove, Uling, Basahan)"
                   size="small"
+                  disabled={isPending || staffLocked}
                   InputProps={{
                     ...params.InputProps,
                     endAdornment: (
@@ -297,13 +340,14 @@ export default function ExpensesClient(props: {
               placeholder="Amount"
               inputMode="decimal"
               size="small"
+              disabled={isPending || staffLocked}
               sx={{ width: { xs: "100%", sm: 180 } }}
             />
 
             <Button
               variant="contained"
               onClick={onAdd}
-              disabled={isPending || !desc.trim() || toNum(amount) <= 0}
+              disabled={isPending || staffLocked || !desc.trim() || toNum(amount) <= 0}
               sx={{ borderRadius: 2, minWidth: 120 }}
             >
               Add
@@ -327,7 +371,7 @@ export default function ExpensesClient(props: {
                     <TableCell>{r.description}</TableCell>
                     <TableCell align="right">{money2(toNum(r.amount))}</TableCell>
                     <TableCell align="right">
-                      <Button variant="outlined" onClick={() => onDelete(r.id)}>
+                      <Button variant="outlined" onClick={() => onDelete(r.id)} disabled={isPending || staffLocked}>
                         Delete
                       </Button>
                     </TableCell>

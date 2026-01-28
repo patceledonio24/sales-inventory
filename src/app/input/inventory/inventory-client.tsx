@@ -43,6 +43,15 @@ function isoDateOnly(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+function todayISOManila() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function safeISODateInput(v: string) {
   const s = (v ?? "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
@@ -71,6 +80,8 @@ export default function InventoryClient(props: {
 
   const [storeId, setStoreId] = useState<string>(safeInitialStoreId);
   const [dateISO, setDateISO] = useState<string>(safeInitialDateISO);
+
+  const staffLocked = props.isStaff && dateISO !== todayISOManila();
 
   // priceMap by productId
   const priceMap = useMemo(() => {
@@ -176,6 +187,14 @@ export default function InventoryClient(props: {
   }
 
   async function onSaveAll() {
+    if (staffLocked) {
+      setSnack({
+        open: true,
+        type: "error",
+        message: "Staff can only save inventory for today.",
+      });
+      return;
+    }
     if (!storeId || !dateISO) return;
 
     startTransition(async () => {
@@ -201,6 +220,8 @@ export default function InventoryClient(props: {
         const msg = typeof e?.message === "string" ? e.message : "";
         if (msg === "UNAUTHORIZED") {
           setSnack({ open: true, type: "error", message: "Unauthorized." });
+        } else if (msg === "STAFF_TODAY_ONLY") {
+          setSnack({ open: true, type: "error", message: "Staff can only save inventory for today." });
         } else {
           setSnack({ open: true, type: "error", message: "Failed to save inventory." });
         }
@@ -289,7 +310,13 @@ export default function InventoryClient(props: {
             <Button
               variant="contained"
               onClick={onSaveAll}
-              disabled={isPending || !storeId || !dateISO || products.length === 0}
+              disabled={
+                isPending ||
+                staffLocked ||
+                !storeId ||
+                !dateISO ||
+                products.length === 0
+              }
               sx={{ borderRadius: 2, minWidth: 140 }}
             >
               {isPending ? "Saving..." : "Save All"}
@@ -297,6 +324,11 @@ export default function InventoryClient(props: {
           </Stack>
         }
       >
+        {staffLocked && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Staff can only save inventory for <b>today</b> ({todayISOManila()}).
+          </Alert>
+        )}
         <SectionCard title="Daily Entries" tip="Tip: Use tab to move across inputs quickly.">
           <Box sx={{ overflowX: "auto" }}>
             <Table size="small" sx={{ minWidth: { xs: 980, md: "auto" } }}>
@@ -351,6 +383,7 @@ export default function InventoryClient(props: {
                           onChange={(e) => updateRow(p.id, { beginQty: e.target.value })}
                           size="small"
                           inputProps={{ inputMode: "numeric" }}
+                          disabled={staffLocked}
                           sx={{ width: { xs: 120, sm: 140 } }}
                         />
                       </TableCell>
@@ -361,6 +394,7 @@ export default function InventoryClient(props: {
                           onChange={(e) => updateRow(p.id, { incomingQty: e.target.value })}
                           size="small"
                           inputProps={{ inputMode: "numeric" }}
+                          disabled={staffLocked}
                           sx={{ width: { xs: 120, sm: 140 } }}
                         />
                       </TableCell>
@@ -371,6 +405,7 @@ export default function InventoryClient(props: {
                           onChange={(e) => updateRow(p.id, { salesQty: e.target.value })}
                           size="small"
                           inputProps={{ inputMode: "numeric" }}
+                          disabled={staffLocked}
                           sx={{ width: { xs: 120, sm: 140 } }}
                         />
                       </TableCell>

@@ -53,6 +53,15 @@ function normalizeMoneyString(v: string) {
   return t === "" ? "0" : t;
 }
 
+function todayISOManila() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 export default function RemittanceClient(props: {
   stores: Store[];
   initialStoreId: string;
@@ -72,6 +81,8 @@ export default function RemittanceClient(props: {
 
   const [storeId, setStoreId] = useState<string>(safeInitialStoreId);
   const [dateISO, setDateISO] = useState<string>(safeInitialDateISO);
+
+  const staffLocked = props.isStaff && dateISO !== todayISOManila();
 
   // Seed values from initial (if exists)
   const [cash, setCash] = useState<string>(props.initial?.cash ?? "0");
@@ -152,6 +163,10 @@ export default function RemittanceClient(props: {
   };
 
   const onSave = () => {
+    if (staffLocked) {
+      setSnack({ open: true, type: "error", message: "Staff can only save remittance for today." });
+      return;
+    }
     const payload = {
       storeId,
       dateISO,
@@ -188,6 +203,11 @@ export default function RemittanceClient(props: {
         }
         if (msg === "INVALID_DATE") {
           setSnack({ open: true, type: "error", message: "Invalid date." });
+          return;
+        }
+
+        if (msg === "STAFF_TODAY_ONLY") {
+          setSnack({ open: true, type: "error", message: "Staff can only save remittance for today." });
           return;
         }
 
@@ -287,7 +307,7 @@ export default function RemittanceClient(props: {
             <Button
               variant="contained"
               onClick={onSave}
-              disabled={isPending || !storeId || !dateISO}
+              disabled={isPending || staffLocked || !storeId || !dateISO}
               sx={{ borderRadius: 2, minWidth: 120 }}
             >
               {isPending ? "Saving..." : "Save"}
@@ -295,6 +315,11 @@ export default function RemittanceClient(props: {
           </Stack>
         }
       >
+        {staffLocked && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Staff can only save remittance for <b>today</b> ({todayISOManila()}).
+          </Alert>
+        )}
         <SectionCard title="Remittance Entry" tip="Tip: Enter amounts then click Save.">
           <ResponsiveTable minWidth={780}>
             <Table size="small" sx={{ minWidth: "inherit" }}>
@@ -330,7 +355,7 @@ export default function RemittanceClient(props: {
                       size="small"
                       inputProps={{ inputMode: "decimal" }}
                       placeholder="0"
-                      disabled={isPending}
+                      disabled={isPending || staffLocked}
                       sx={{ width: { xs: 120, sm: 140 } }}
                     />
                   </TableCell>
@@ -342,7 +367,7 @@ export default function RemittanceClient(props: {
                       size="small"
                       inputProps={{ inputMode: "decimal" }}
                       placeholder="0"
-                      disabled={isPending}
+                      disabled={isPending || staffLocked}
                       sx={{ width: { xs: 120, sm: 140 } }}
                     />
                   </TableCell>
@@ -354,7 +379,7 @@ export default function RemittanceClient(props: {
                       size="small"
                       inputProps={{ inputMode: "numeric" }}
                       placeholder="0"
-                      disabled={isPending}
+                      disabled={isPending || staffLocked}
                       sx={{ width: { xs: 110, sm: 130 } }}
                     />
                   </TableCell>
@@ -375,7 +400,7 @@ export default function RemittanceClient(props: {
                       onChange={(e) => setNotes(e.target.value)}
                       size="small"
                       placeholder="Optional notes..."
-                      disabled={isPending}
+                      disabled={isPending || staffLocked}
                       fullWidth
                     />
                   </TableCell>

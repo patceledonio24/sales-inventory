@@ -9,138 +9,131 @@ function isoDateOnly(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-export async function exportWeeklyCSV() {
+function startOfDayUTCFromISO(iso: string) {
+  // Expect YYYY-MM-DD
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) throw new Error("INVALID_DATE");
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function endOfDayUTC(d: Date) {
+  // 23:59:59.999Z for the same UTC day
+  return new Date(d.getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
+function fmt2(n: number) {
+  return n.toFixed(2);
+}
+
+/**
+ * Export the Weekly Dashboard CSV for the selected store/date range.
+ * Mirrors the numbers shown in /reports/weekly.
+ */
+export async function exportWeeklyCSV(storeId: string, fromISO: string, toISO: string) {
   const session = await getServerSession(authOptions);
   if ((session?.user as any)?.role !== "ADMIN") {
     throw new Error("UNAUTHORIZED");
   }
 
-  // ===== Server-owned week range (last 7 days, UTC) =====
-  const today = new Date();
-  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const start = new Date(end);
-  start.setUTCDate(end.getUTCDate() - 6);
+  if (!storeId) throw new Error("MISSING_STORE");
+  if (!fromISO || !toISO) throw new Error("MISSING_RANGE");
 
-  const startISO = isoDateOnly(start);
-  const endISO = isoDateOnly(end);
-  const DAYS = 7;
+  const from = startOfDayUTCFromISO(fromISO);
+  const to = startOfDayUTCFromISO(toISO);
+  const safeFrom = from.getTime() <= to.getTime() ? from : to;
+  const safeTo = from.getTime() <= to.getTime() ? to : from;
 
-  // ===== Fetch inventory entries (NO product relation) =====
-  const entries = await prisma.dailyInventoryEntry.findMany({
-    where: {
-      date: {
-        gte: start,
-        lte: new Date(end.getTime() + 24 * 60 * 60 * 1000 - 1),
-      },
-    },
-    select: {
-      productId: true,
-      salesQty: true,
-      lpSnapshot: true,
-      srpSnapshot: true,
-    },
-  });
-
-  // ===== Fetch total discount qty from remittances for the same range =====
-  const remits = await prisma.dailyRemittance.findMany({
-    where: {
-      date: {
-        gte: start,
-        lte: new Date(end.getTime() + 24 * 60 * 60 * 1000 - 1),
-      },
-    },
-    select: {
-      discountedQty: true,
-    },
-  });
-
-  const discountTotal = remits.reduce((s, r) => s + Math.max(0, Number((r as any).discountedQty ?? 0)) * 9, 0);
-
-  // ===== Fetch products separately =====
-  const products = await prisma.product.findMany({
+  // Validate store exists (and active) to avoid exporting garbage
+  const store = await prisma.store.findFirst({
+    where: { id: storeId, isActive: true },
     select: { id: true, name: true },
   });
+  if (!store) throw new Error("INVALID_STORE");
 
-  const productNameById = new Map(products.map((p) => [p.id, p.name]));
+  const entries = await prisma.dailyInventoryEntry.findMany({
+    where: { storeId, date: { gte: safeFrom, lte: endOfDayUTC(safeTo) } },
+    select: { date: true, salesQty: true, srpSnapshot: true },
+  });
 
-  // ===== Aggregate by PRODUCT (gross, before day-level discount) =====
-  const map = new Map<string, { product: string; lp: number; srp: number; rev: number; qty: number }>();
+  const remits = await prisma.dailyRemittance.findMany({
+    where: { storeId, date: { gte: safeFrom, lte: endOfDayUTC(safeTo) } },
+    select: { date: true, cash: true, gcash: true, discountedQty: true },
+  });
+
+  const expenses = await prisma.dailyExpense.findMany({
+    where: { storeId, date: { gte: safeFrom, lte: endOfDayUTC(safeTo) } },
+    select: { date: true, amount: true },
+  });
+
+  // Aggregate per UTC date (same as weekly/page.tsx)
+  const byDay = new Map<
+    string,
+    { salesGross: number; discountQty: number; cash: number; gcash: number; expenses: number }
+  >();
+
+  const ensure = (k: string) => {
+    if (!byDay.has(k)) byDay.set(k, { salesGross: 0, discountQty: 0, cash: 0, gcash: 0, expenses: 0 });
+    return byDay.get(k)!;
+  };
 
   for (const r of entries) {
-    const productName = productNameById.get(r.productId);
-    if (!productName) continue;
-
+    const k = isoDateOnly(r.date);
     const qty = Number(r.salesQty ?? 0);
     const srp = decimalToNumber(r.srpSnapshot, 0);
-    const lp = decimalToNumber(r.lpSnapshot, 0);
-    const rev = qty * srp;
-
-    const cur = map.get(r.productId) ?? { product: productName, lp, srp, rev: 0, qty: 0 };
-    cur.rev += rev;
-    cur.qty += qty;
-    map.set(r.productId, cur);
+    ensure(k).salesGross += (Number.isFinite(qty) ? qty : 0) * srp;
   }
 
-  // ===== Build CSV =====
-  const header = [
-    "Product",
-    "LP",
-    "SRP",
-    "Total Week Revenue",
-    "Ave/Day (Rev)",
-    "Qty Sold (pcs)",
-    "Ave/Day (pcs)",
-  ];
+  for (const r of remits) {
+    const k = isoDateOnly(r.date);
+    ensure(k).cash += decimalToNumber(r.cash, 0);
+    ensure(k).gcash += decimalToNumber(r.gcash, 0);
+    ensure(k).discountQty += Math.max(0, Number((r as any).discountedQty ?? 0));
+  }
 
-  const body = Array.from(map.values()).map((v) => [
-    v.product,
-    v.lp ? v.lp.toFixed(2) : "",
-    v.srp ? v.srp.toFixed(2) : "",
-    v.rev.toFixed(2),
-    (v.rev / DAYS).toFixed(2),
-    v.qty.toFixed(2),
-    (v.qty / DAYS).toFixed(2),
-  ]);
+  for (const r of expenses) {
+    const k = isoDateOnly(r.date);
+    ensure(k).expenses += decimalToNumber(r.amount, 0);
+  }
 
-  const grossTotalRev = body.reduce((s, r) => s + Number(r[3]), 0);
-  const totalQty = body.reduce((s, r) => s + Number(r[5]), 0);
+  // Build a continuous range (even if some days have 0s)
+  const dayMs = 24 * 60 * 60 * 1000;
+  const days: { date: string; sales: string; cash: string; gcash: string; expenses: string; net: string }[] = [];
 
-  body.push([
-    "TOTAL (GROSS)",
-    "",
-    "",
-    grossTotalRev.toFixed(2),
-    "",
-    totalQty.toFixed(2),
-    (totalQty / DAYS).toFixed(2),
-  ]);
+  for (let t = safeFrom.getTime(); t <= safeTo.getTime(); t += dayMs) {
+    const d = new Date(t);
+    const k = isoDateOnly(d);
+    const v = ensure(k);
 
-  body.push([
-    "DISCOUNT (PWD/Senior)",
-    "",
-    "",
-    (-discountTotal).toFixed(2),
-    "",
-    "",
-    "",
-  ]);
+    const discountAmount = v.discountQty * 9;
+    const salesNet = v.salesGross - discountAmount;
+    const net = salesNet - v.expenses;
 
-  body.push([
-    "TOTAL (NET)",
-    "",
-    "",
-    (grossTotalRev - discountTotal).toFixed(2),
-    "",
-    "",
-    "",
-  ]);
+    days.push({
+      date: k,
+      sales: fmt2(salesNet),
+      cash: fmt2(v.cash),
+      gcash: fmt2(v.gcash),
+      expenses: fmt2(v.expenses),
+      net: fmt2(net),
+    });
+  }
+
+  const totalSales = days.reduce((s, r) => s + Number(r.sales), 0);
+  const totalCash = days.reduce((s, r) => s + Number(r.cash), 0);
+  const totalGCash = days.reduce((s, r) => s + Number(r.gcash), 0);
+  const totalExpenses = days.reduce((s, r) => s + Number(r.expenses), 0);
+  const totalNet = totalSales - totalExpenses;
+
+  const header = ["Date", "Sales (NET)", "Cash", "GCash", "Expenses", "Net"];
+  const body = days.map((r) => [r.date, r.sales, r.cash, r.gcash, r.expenses, r.net]);
+  body.push(["TOTAL", fmt2(totalSales), fmt2(totalCash), fmt2(totalGCash), fmt2(totalExpenses), fmt2(totalNet)]);
 
   const csv = [header, ...body]
-    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+    .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
     .join("\n");
 
   return {
-    filename: `weekly-product-report-${startISO}-to-${endISO}.csv`,
+    filename: `sales-report-${store.name}-${isoDateOnly(safeFrom)}-to-${isoDateOnly(safeTo)}.csv`,
     content: csv,
   };
 }

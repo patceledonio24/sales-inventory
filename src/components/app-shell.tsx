@@ -130,7 +130,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const navItemsMrLiempo = [
     { href: "/", label: "Home", icon: <HomeIcon /> },
     { href: "/input/inventory", label: "Inventory Input", icon: <InventoryIcon /> },
-    { href: "/input/pricing", label: "Pricing", icon: <PriceIcon /> },
+    ...(isAdmin ? [{ href: "/input/pricing", label: "Pricing", icon: <PriceIcon /> }] : []),
     { href: "/input/remittance", label: "Remittance", icon: <PaymentsIcon /> },
     { href: "/input/expenses", label: "Petty Cash / Expenses", icon: <ReceiptLongIcon /> },
 

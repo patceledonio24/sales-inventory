@@ -31,6 +31,10 @@ export default async function AuditPage({
   const dateISO = sp?.date ?? isoDateOnly(new Date());
   const date = new Date(dateISO + "T00:00:00.000Z");
 
+  // Previous day (used for petty cash running balance display)
+  const prevDate = new Date(date);
+  prevDate.setUTCDate(prevDate.getUTCDate() - 1);
+
   const rem = storeId
     ? await prisma.dailyRemittance.findUnique({
         where: { storeId_date: { storeId, date } },
@@ -70,6 +74,26 @@ export default async function AuditPage({
 
   const expTotal = expRows.reduce((sum, r) => sum + decimalToNumber(r.amount, 0), 0);
 
+  // Previous day petty cash balance = (cash + gcash) - expenses (previous day)
+  const prevRem = storeId
+    ? await prisma.dailyRemittance.findUnique({
+        where: { storeId_date: { storeId, date: prevDate } },
+        select: { cash: true, gcash: true },
+      })
+    : null;
+
+  const prevExpAgg = storeId
+    ? await prisma.dailyExpense.aggregate({
+        where: { storeId, date: prevDate },
+        _sum: { amount: true },
+      })
+    : { _sum: { amount: null } };
+
+  const prevCash = prevRem ? decimalToNumber(prevRem.cash, 0) : 0;
+  const prevGcash = prevRem ? decimalToNumber(prevRem.gcash, 0) : 0;
+  const prevExpTotal = decimalToNumber((prevExpAgg as any)?._sum?.amount, 0);
+  const prevPettyCashBalance = prevCash + prevGcash - prevExpTotal;
+
   const timeFmt = new Intl.DateTimeFormat("en-PH", {
     timeStyle: "medium",
     timeZone: "Asia/Manila",
@@ -99,6 +123,7 @@ export default async function AuditPage({
             remainingAbs: Math.abs(remaining).toFixed(2),
             remainingStatus: remaining < 0 ? "OVER" : remaining > 0 ? "UNDER" : "BALANCED",
             notes: rem?.notes ?? "",
+            previousPettyCashBalance: prevPettyCashBalance.toFixed(2),
           }}
           expenses={expRows.map((r) => ({
             id: r.id,

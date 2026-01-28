@@ -15,6 +15,11 @@ export default async function PricingPage({
   const role = (session?.user as any)?.role as "ADMIN" | "STAFF" | undefined;
   const isStaff = role === "STAFF";
 
+  // Pricing is ADMIN-only
+  if (!session?.user || role !== "ADMIN") {
+    return <div style={{ padding: 24 }}>Unauthorized</div>;
+  }
+
   const stores = await prisma.store.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
@@ -48,7 +53,7 @@ export default async function PricingPage({
     <div style={{ padding: 24 }}>
       <h1 style={{ fontSize: 22, fontWeight: 600 }}>Pricing (LP / SRP)</h1>
       <p style={{ marginTop: 8 }}>
-        Manual input page for LP (cost) and SRP (selling price). Accessible to ADMIN and STAFF.
+        Manual input page for LP (cost) and SRP (selling price). ADMIN-only.
       </p>
 
       <div style={{ marginTop: 16 }}>

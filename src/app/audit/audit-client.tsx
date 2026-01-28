@@ -56,6 +56,8 @@ export default function AuditClient(props: {
     notes?: string;
     // Optional future-proof if you later pass it from server:
     runningPettyCash?: string;
+    // Previous day petty cash balance (used for running balance header)
+    previousPettyCashBalance?: string;
   };
   expenses: {
     id: string;
@@ -133,6 +135,14 @@ export default function AuditClient(props: {
     }
     return cashNum + gcashNum - expensesNum;
   }, [cashNum, gcashNum, expensesNum, props.totals.runningPettyCash]);
+
+  const previousPettyCashBalance = useMemo(() => {
+    return money(props.totals.previousPettyCashBalance ?? "0");
+  }, [props.totals.previousPettyCashBalance]);
+
+  const runningBalance = useMemo(() => {
+    return previousPettyCashBalance + pettyCashBalance;
+  }, [previousPettyCashBalance, pettyCashBalance]);
 
   const highlight: "red" | "orange" | "green" =
     statusLabel === "SHORT" ? "red" : statusLabel === "OVER" ? "orange" : "green";
@@ -289,6 +299,13 @@ export default function AuditClient(props: {
             </Typography>
             <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.1 }}>
               ₱{money2(pettyCashBalance)}
+            </Typography>
+
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+              Running Balance
+            </Typography>
+            <Typography variant="subtitle2" fontWeight={900} sx={{ lineHeight: 1.1 }}>
+              ₱{money2(runningBalance)}
             </Typography>
           </Stack>
 

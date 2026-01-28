@@ -16,6 +16,7 @@ import { useTheme } from "@mui/material/styles";
 import { useRouter } from "next/navigation";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
+import { exportWeeklyCSV } from "./export";
 
 type Store = { id: string; name: string };
 type DayRow = { date: string; sales: string; cash: string; gcash: string; expenses: string; net: string };
@@ -177,8 +178,28 @@ export default function ReportsClient(props: {
 
   function exportCSV() {
     if (!canRun) return;
-    window.location.href =
-      `/reports/weekly/export?storeId=${encodeURIComponent(storeId)}&from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}&compare=${compare}`;
+    // Use a server action + blob download (more reliable than a Route Handler and avoids 404s)
+    exportWeeklyCSV(storeId, fromISO, toISO)
+      .then((res) => {
+        const blob = new Blob([res.content], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = res.filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch((e) => {
+        console.error("Export failed", e);
+        alert("Export failed. Please try again.");
+      });
+  }
+
+  function generatePDF() {
+    if (!canRun) return;
+    const url = `/reports/weekly/pdf?storeId=${encodeURIComponent(storeId)}&from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`;
+    // Open a print-friendly report page. User can “Save as PDF”.
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   const paymentPie = React.useMemo(() => {
@@ -281,6 +302,9 @@ export default function ReportsClient(props: {
               </Button>
               <Button variant="outlined" onClick={exportCSV} disabled={!canRun}>
                 Export CSV
+              </Button>
+              <Button variant="outlined" onClick={generatePDF} disabled={!canRun}>
+                Generate PDF
               </Button>
             </Stack>
           </CardContent>
