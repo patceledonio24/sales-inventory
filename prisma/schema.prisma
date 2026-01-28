@@ -1,6 +1,5 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -131,17 +130,4 @@ model DailyExpense {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([storeId, date])
-}
-
-model ExpenseSuggestion {
-  id         String   @id @default(cuid())
-  storeId    String
-  text       String
-  usageCount Int      @default(1)
-  lastUsedAt DateTime @default(now())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@unique([storeId, text])
-  @@index([storeId, usageCount, lastUsedAt])
 }

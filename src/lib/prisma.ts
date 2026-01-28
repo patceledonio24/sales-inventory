@@ -1,36 +1,41 @@
-import { PrismaClient } from "@/generated/prisma/client";
-import { withAccelerate } from "@prisma/extension-accelerate";
+// src/lib/prisma.ts
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+function safeHost(url?: string) {
+  if (!url) return "";
+  const at = url.split("@")[1];
+  if (!at) return "";
+  return at.split("/")[0] || "";
+}
 
 function createPrismaClient() {
   const accelerateUrl = process.env.PRISMA_ACCELERATE_URL;
 
-  if (!accelerateUrl) {
-    throw new Error("Missing PRISMA_ACCELERATE_URL");
+  if (process.env.NODE_ENV !== "production") {
+    console.log("DB_ENV:", process.env.DB_ENV);
+    console.log("DIRECT_URL host:", safeHost(process.env.DIRECT_URL));
+    console.log("DATABASE_URL host:", safeHost(process.env.DATABASE_URL));
+    console.log("Using Accelerate:", Boolean(accelerateUrl));
   }
 
-  if (
-    process.env.NODE_ENV === "development" &&
-    (process.env.VERCEL_ENV === "production" || process.env.NEXT_PUBLIC_APP_ENV === "prod")
-  ) {
-    throw new Error("Refusing to run PROD configuration in development.");
+  // Vercel / cloud runtime
+  if (accelerateUrl) {
+    return new PrismaClient({ accelerateUrl });
   }
 
-  if (process.env.DB_ENV !== process.env.NEXT_PUBLIC_APP_ENV) {
-    throw new Error("DB_ENV and NEXT_PUBLIC_APP_ENV mismatch");
-  }
+  // Local / direct DB runtime
+  const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("Missing DIRECT_URL/DATABASE_URL");
 
-  return new PrismaClient({
-    accelerateUrl,
-    log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["error"],
-  }).$extends(withAccelerate());
+  const adapter = new PrismaPg({ connectionString });
+  return new PrismaClient({ adapter });
 }
 
-type PrismaClientWithAccelerate = ReturnType<typeof createPrismaClient>;
-
+// Prevent multiple Prisma instances during dev HMR
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClientWithAccelerate | undefined;
+  prisma?: ReturnType<typeof createPrismaClient>;
 };
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
