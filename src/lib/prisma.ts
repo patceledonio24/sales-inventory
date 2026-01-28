@@ -16,7 +16,7 @@ function createPrismaClient() {
     console.log("DB_ENV:", process.env.DB_ENV);
     console.log("DIRECT_URL host:", safeHost(process.env.DIRECT_URL));
     console.log("DATABASE_URL host:", safeHost(process.env.DATABASE_URL));
-    console.log("Using Accelerate:", Boolean(accelerateUrl));
+    console.log("Using Accelerate URL:", Boolean(accelerateUrl));
   }
 
   // Vercel / cloud runtime
